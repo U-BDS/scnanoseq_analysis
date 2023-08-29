@@ -17,14 +17,16 @@ lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/"
 
 #### CONSTANT DEFS ####
 
+feature_type <- 'transcript'
+
 # The path to the input file
-in_file <- "input/isoquant/q20.gene_counts.tsv"
+in_file <- paste0("input/isoquant/q20.", feature_type, "_counts.tsv")
 
 # The name of the project to use in seurat
 project_name <- "isoquant_q20_seurat"
 
 # The prefix to output files
-output_prefix <- "./output/isoquant/q20/gene/"
+output_prefix <- paste0("./output/isoquant/q20/", feature_type, "/")
 
 #### PREPARE INPUT DATA ####
 
@@ -514,624 +516,101 @@ relevant_markers <- seurat_obj.markers %>%
 write.csv(relevant_markers, paste0(output_prefix, "top_markers.csv"), row.names = FALSE)
 
 
-#### CELL MAKERS - BLAZE GENE MARKERS ####
+#### MARKER FUNCTIONS ####
 
+plot_markers_by_mtx <- function(seurat_obj_mtx,
+                                marker_mtx,
+                                feature,
+                                out_dir_mtx = './marker_plots/', 
+                                out_prefix_mtx = ''){
+  # This will grab the correct columns from the matrix and try to plot the 
+  # markers for the seurat object. This will also create help split up markers
+  # in the case for the transcript so they are easily navigable.
+  if (feature == 'gene'){
+    plot_markers_by_list(seurat_obj_mtx,
+                         unique(marker_mtx$gene),
+                         paste0(out_dir_mtx, feature, '/'),
+                         out_prefix_mtx)
+    
+  } else if (feature == 'transcript'){
+    for (g in unique(marker_mtx$gene)){
+      t <- marker_mtx[marker_mtx$gene == g,]$transcript
+      
+      # TODO: Find an R way to do this, need to find out how to check if markers exist
+      tryCatch({
+        plot_markers_by_list(seurat_obj_mtx,
+                             unique(t),
+                             paste0(out_dir_mtx, feature, '/'),
+                             paste0(g, '.'))
+      }, error = function(e){print(e)})
+    }
+  }
+}
+
+plot_markers_by_list <- function(seurat_obj_lst, 
+                                 marker_lst,
+                                 out_dir_lst = './marker_plots/',
+                                 out_prefix_lst = ''){
+  # Given a list of markers, this will generate a feature plot, violin plot,
+  # and a dot plot for the seurat object that is passed in
+  dir.create(file.path(out_dir_lst), recursive = TRUE)
+
+  # Feature Plot
+  png(paste0(out_dir_lst, out_prefix_lst, "markers_featureplot.png"),
+      width = 1024,
+      height = 768)
+  
+  print(
+    FeaturePlot(object = seurat_obj_lst,
+                features = marker_lst,
+                reduction = "umap")
+  )
+
+  dev.off()
+  
+  # Violin Plot
+  png(paste0(out_dir_lst, out_prefix_lst, "markers_violinplot.png"),
+      width = 1024,
+      height = 768)
+
+  print(
+    VlnPlot(object = seurat_obj_lst,
+            split.by = "seurat_clusters",
+            features = marker_lst,
+            assay = "RNA")
+  )
+
+  dev.off()
+  
+  # Dot Plot
+  png(paste0(out_dir_lst, out_prefix_lst, "markers_dotplot.png"),
+      width = 1024,
+      height = 768)
+  
+  print(
+    DotPlot(object = seurat_obj_lst,
+            features = marker_lst,
+            group.by = "seurat_clusters",
+            assay = "RNA",
+            col.min= -1.5,
+            col.max= 1.5,
+            scale= TRUE,
+            cluster.idents=FALSE,
+            cols = "RdYlBu")  + coord_flip()
+  )
+
+  dev.off()
+  
+}
+
+#### BLAZE MARKERS ####
 markers <- read.table("input/references/blaze_markers.csv",
                       sep=",",
                       header = TRUE,
                       row.names = NULL)
 
-gene_markers <- unique(markers$gene)
-
-gene_markers_dir <- paste0(output_prefix, "/markers/")
-dir.create(file.path(gene_marker_dir), recursive = TRUE)
-
-# Feature Plot
-png(paste0(gene_markers_dir, "blaze_gene_markers_featureplot.png"), width = 1024, height = 768)
-
-FeaturePlot(object = seurat_obj,
-            features = gene_markers,
-            reduction = "umap")
-
-dev.off()
-
-# Violin Plot
-png(paste0(gene_markers_dir, "blaze_gene_markers_violinplot.png"), width = 1024, height = 768)
-
-VlnPlot(object = seurat_obj,
-        split.by = "seurat_clusters",
-        features = gene_markers,
-        assay = "RNA")
-
-dev.off()
-
-# Dot Plot
-png(paste0(gene_markers_dir, "blaze_gene_markers_dotplot.png"), width = 1024, height = 768)
-
-DotPlot(object = seurat_obj,
-        features = gene_markers,
-        group.by = "seurat_clusters",
-        assay = "RNA",
-        col.min= -1.5,
-        col.max= 1.5,
-        scale= TRUE,
-        cluster.idents=FALSE,
-        cols = "RdYlBu")  + coord_flip()
-
-dev.off()
-
-# TODO: Refine the transcript markers stuff to go off the marker list
-
-#### CELL MAKERS - BLAZE TRANSCRIPT MARKERS (ENSG00000007372) ####
-markers.blaze <-c("ENST00000606377.7",
-                  "ENST00000639386.2",
-                  "ENST00000419022.6",
-                  "ENST00000643871.1",
-                  "ENST00000638914.3",
-                  "ENST00000640610.1",
-                  "ENST00000379132.8",
-                  "ENST00000379109.7",
-                  "ENST00000379129.7",
-                  "ENST00000639916.1",
-                  "ENST00000640368.2",
-                  "ENST00000638685.1",
-                  "ENST00000379107.7",
-                  "ENST00000639409.1",
-                  "ENST00000640975.1",
-                  "ENST00000638963.1",
-                  "ENST00000638965.1",
-                  "ENST00000241001.13",
-                  "ENST00000474783.2",
-                  "ENST00000638629.1",
-                  "ENST00000639548.1",
-                  "ENST00000640125.1",
-                  "ENST00000481563.6",
-                  "ENST00000638696.1",
-                  "ENST00000638755.1",
-                  "ENST00000470027.7",
-                  "ENST00000640287.1",
-                  "ENST00000533333.5",
-                  "ENST00000640613.1",
-                  "ENST00000423822.7",
-                  "ENST00000639061.1",
-                  "ENST00000640766.1",
-                  "ENST00000640963.1",
-                  "ENST00000471303.6",
-                  "ENST00000379111.7",
-                  "ENST00000639950.1",
-                  "ENST00000464174.6",
-                  "ENST00000494377.7",
-                  "ENST00000638250.1",
-                  "ENST00000379123.10",
-                  "ENST00000640038.1",
-                  "ENST00000524853.6",
-                  "ENST00000640872.1",
-                  "ENST00000639394.1",
-                  "ENST00000640735.1",
-                  "ENST00000639109.1",
-                  "ENST00000638853.1",
-                  "ENST00000640460.1",
-                  "ENST00000638913.1",
-                  "ENST00000638802.1",
-                  "ENST00000638346.1",
-                  "ENST00000530373.6",
-                  "ENST00000379115.9",
-                  "ENST00000639006.1",
-                  "ENST00000639054.1",
-                  "ENST00000640335.1",
-                  "ENST00000638762.1",
-                  "ENST00000438681.6",
-                  "ENST00000638878.1",
-                  "ENST00000639943.1",
-                  "ENST00000640431.1",
-                  "ENST00000532916.5",
-                  "ENST00000639034.2",
-                  "ENST00000531910.6",
-                  "ENST00000640172.1",
-                  "ENST00000640684.1",
-                  "ENST00000639079.1",
-                  "ENST00000640242.1",
-                  "ENST00000455099.6",
-                  "ENST00000530714.6",
-                  "ENST00000534353.5",
-                  "ENST00000533156.2",
-                  "ENST00000639920.1",
-                  "ENST00000534390.2",
-                  "ENST00000527769.5",
-                  "ENST00000532175.5",
-                  "ENST00000640251.1",
-                  "ENST00000638278.1",
-                  "ENST00000640617.1",
-                  "ENST00000639203.1",
-                  "ENST00000640819.1")
-
-# Feature Plot
-png(paste0(output_prefix, "blaze_transcript_markers_featureplot.ENSG00000007372.png"), width = 1024, height = 768)
-
-FeaturePlot(object = seurat_obj,
-            features = unique(markers.blaze),
-            reduction = "umap")
-
-dev.off()
-
-# Violin Plot
-png(paste0(output_prefix, "blaze_transcript_markers_violinplot.ENSG00000007372.png"), width = 1024, height = 768)
-
-VlnPlot(object = seurat_obj,
-        split.by = "seurat_clusters",
-        features = unique(markers.blaze),
-        assay = "RNA")
-
-dev.off()
-
-# Dot Plot
-png(paste0(output_prefix, "blaze_transcript_markers_dotplot.ENSG00000007372.png"), width = 1024, height = 768)
-
-DotPlot(object = seurat_obj,
-        features = unique(markers.blaze),
-        group.by = "seurat_clusters",
-        assay = "RNA",
-        col.min= -1.5,
-        col.max= 1.5,
-        scale= TRUE,
-        cluster.idents=FALSE,
-        cols = "RdYlBu")  + coord_flip()
-
-dev.off()
-
-#### CELL MAKERS - BLAZE TRANSCRIPT MARKERS (ENSG00000026025) ####
-markers.blaze <-c("ENST00000544301.7",
-                  "ENST00000478746.1",
-                  "ENST00000497849.1",
-                  "ENST00000224237.9",
-                  "ENST00000487938.5",
-                  "ENST00000485947.1",
-                  "ENST00000469543.5",
-                  "ENST00000421459.2",
-                  "ENST00000637053.1",
-                  "ENST00000495528.1")
-
-# Feature Plot
-png(paste0(output_prefix, "blaze_transcript_markers_featureplot.ENSG00000026025.png"), width = 1024, height = 768)
-
-FeaturePlot(object = seurat_obj,
-            features = unique(markers.blaze),
-            reduction = "umap")
-
-dev.off()
-
-# Violin Plot
-png(paste0(output_prefix, "blaze_transcript_markers_violinplot.ENSG00000026025.png"), width = 1024, height = 768)
-
-VlnPlot(object = seurat_obj,
-        split.by = "seurat_clusters",
-        features = unique(markers.blaze),
-        assay = "RNA")
-
-dev.off()
-
-# Dot Plot
-png(paste0(output_prefix, "blaze_transcript_markers_dotplot.ENSG00000026025.png"), width = 1024, height = 768)
-
-DotPlot(object = seurat_obj,
-        features = unique(markers.blaze),
-        group.by = "seurat_clusters",
-        assay = "RNA",
-        col.min= -1.5,
-        col.max= 1.5,
-        scale= TRUE,
-        cluster.idents=FALSE,
-        cols = "RdYlBu")  + coord_flip()
-
-dev.off()
-#### CELL MAKERS - BLAZE TRANSCRIPT MARKERS (ENSG00000104888) ####
-markers.blaze <-c("ENST00000221485.8",
-                  "ENST00000600601.5",
-                  "ENST00000600672.5",
-                  "ENST00000596689.1",
-                  "ENST00000598018.1")
-
-# Feature Plot
-png(paste0(output_prefix, "blaze_transcript_markers_featureplot.ENSG00000104888.png"), width = 1024, height = 768)
-
-FeaturePlot(object = seurat_obj,
-            features = unique(markers.blaze),
-            reduction = "umap")
-
-dev.off()
-
-# Violin Plot
-png(paste0(output_prefix, "blaze_transcript_markers_violinplot.ENSG00000104888.png"), width = 1024, height = 768)
-
-VlnPlot(object = seurat_obj,
-        split.by = "seurat_clusters",
-        features = unique(markers.blaze),
-        assay = "RNA")
-
-dev.off()
-
-# Dot Plot
-png(paste0(output_prefix, "blaze_transcript_markers_dotplot.ENSG00000104888.png"), width = 1024, height = 768)
-
-DotPlot(object = seurat_obj,
-        features = unique(markers.blaze),
-        group.by = "seurat_clusters",
-        assay = "RNA",
-        col.min= -1.5,
-        col.max= 1.5,
-        scale= TRUE,
-        cluster.idents=FALSE,
-        cols = "RdYlBu")  + coord_flip()
-
-dev.off()
-#### CELL MAKERS - BLAZE TRANSCRIPT MARKERS (ENSG00000124785) ####
-markers.blaze <-c("ENST00000244766.7",
-                  "ENST00000622188.4",
-                  "ENST00000616243.1",
-                  "ENST00000495850.1")
-
-# Feature Plot
-png(paste0(output_prefix, "blaze_transcript_markers_featureplot.ENSG00000124785.png"), width = 1024, height = 768)
-
-FeaturePlot(object = seurat_obj,
-            features = unique(markers.blaze),
-            reduction = "umap")
-
-dev.off()
-
-# Violin Plot
-png(paste0(output_prefix, "blaze_transcript_markers_violinplot.ENSG00000124785.png"), width = 1024, height = 768)
-
-VlnPlot(object = seurat_obj,
-        split.by = "seurat_clusters",
-        features = unique(markers.blaze),
-        assay = "RNA")
-
-dev.off()
-
-# Dot Plot
-png(paste0(output_prefix, "blaze_transcript_markers_dotplot.ENSG00000124785.png"), width = 1024, height = 768)
-
-DotPlot(object = seurat_obj,
-        features = unique(markers.blaze),
-        group.by = "seurat_clusters",
-        assay = "RNA",
-        col.min= -1.5,
-        col.max= 1.5,
-        scale= TRUE,
-        cluster.idents=FALSE,
-        cols = "RdYlBu")  + coord_flip()
-
-dev.off()
-#### CELL MAKERS - BLAZE TRANSCRIPT MARKERS (ENSG00000131095) ####
-
-# These markers are the transcripts of the gene in the header + all overlapping
-# transcripts. These were included because when comparing only the transcripts,
-# the markers were not found so the marker list was expanded to include all
-# overlapping markers
-#markers.blaze <-c("ENST00000417826.3",
-#                  "ENST00000588735.3",
-#                  "ENST00000639277.1",
-#                  "ENST00000638304.1",
-#                  "ENST00000441312.2",
-#                  "ENST00000639243.1",
-#                  "ENST00000638488.1",
-#                  "ENST00000639369.1",
-#                  "ENST00000592065.2",
-#                  "ENST00000640859.1",
-#                  "ENST00000638400.1",
-#                  "ENST00000639042.1",
-#                  "ENST00000640545.1",
-#                  "ENST00000253408.11",
-#                  "ENST00000638921.1",
-#                  "ENST00000586125.2",
-#                  "ENST00000638618.1",
-#                  "ENST00000589701.2",
-#                  "ENST00000592706.5",
-#                  "ENST00000585543.6",
-#                  "ENST00000591880.2",
-#                  "ENST00000588640.5",
-#                  "ENST00000640552.1",
-#                  "ENST00000435360.8",
-#                  "ENST00000591327.2",
-#                  "ENST00000638281.1",
-#                  "ENST00000639921.1",
-#                  "ENST00000592320.6",
-#                  "ENST00000586127.6",
-#                  "ENST00000586793.6",
-#                  "ENST00000587997.6",
-#                  "ENST00000376990.8",
-#                  "ENST00000591719.5",
-#                  "ENST00000590922.1",
-#                  "ENST00000588957.5",
-#                  "ENST00000588316.1",
-#                  "ENST00000585728.5",
-#                  "ENST00000588037.1",
-#                  "ENST00000593179.1",
-#                  "ENST00000331733.5",
-#                  "ENST00000577339.5",
-#                  "ENST00000410006.6",
-#                  "ENST00000357776.6",
-#                  "ENST00000417826.3",
-#                  "ENST00000410027.5",
-#                  "ENST00000331733.5",
-#                  "ENST00000426333.7",
-#                  "ENST00000592576.5",
-#                  "ENST00000591382.5",
-#                  "ENST00000591382.5",
-#                  "ENST00000588374.1",
-#                  "ENST00000593072.5",
-#                  "ENST00000589825.5",
-#                  "ENST00000592408.5",
-#                  "ENST00000592701.2",
-#                  "ENST00000590105.1",
-#                  "ENST00000587309.5",
-#                  "ENST00000593135.6",
-#                  "ENST00000590129.1")
-
-# This marker list contains ONLY the transcripts that are apart of the gene
-markers.blaze <-c("ENST00000417826.3",
-                  "ENST00000588735.3",
-                  "ENST00000639277.1",
-                  "ENST00000638304.1",
-                  "ENST00000441312.2",
-                  "ENST00000639243.1",
-                  "ENST00000638488.1",
-                  "ENST00000639369.1",
-                  "ENST00000592065.2",
-                  "ENST00000640859.1",
-                  "ENST00000638400.1",
-                  "ENST00000639042.1",
-                  "ENST00000640545.1",
-                  "ENST00000253408.11",
-                  "ENST00000638921.1",
-                  "ENST00000586125.2",
-                  "ENST00000638618.1",
-                  "ENST00000589701.2",
-                  "ENST00000592706.5",
-                  "ENST00000585543.6",
-                  "ENST00000591880.2",
-                  "ENST00000588640.5",
-                  "ENST00000640552.1",
-                  "ENST00000435360.8",
-                  "ENST00000591327.2",
-                  "ENST00000638281.1",
-                  "ENST00000639921.1",
-                  "ENST00000592320.6",
-                  "ENST00000586127.6",
-                  "ENST00000586793.6",
-                  "ENST00000587997.6",
-                  "ENST00000376990.8",
-                  "ENST00000591719.5",
-                  "ENST00000590922.1",
-                  "ENST00000588957.5",
-                  "ENST00000588316.1",
-                  "ENST00000585728.5",
-                  "ENST00000588037.1",
-                  "ENST00000593179.1")
-
-# Feature Plot
-png(paste0(output_prefix, "blaze_transcript_markers_featureplot.ENSG00000131095.png"), width = 1024, height = 768)
-
-FeaturePlot(object = seurat_obj,
-            features = unique(markers.blaze),
-            reduction = "umap")
-
-dev.off()
-
-# Violin Plot
-png(paste0(output_prefix, "blaze_transcript_markers_violinplot.ENSG00000131095.png"), width = 1024, height = 768)
-
-VlnPlot(object = seurat_obj,
-        split.by = "seurat_clusters",
-        features = unique(markers.blaze),
-        assay = "RNA")
-
-dev.off()
-
-# Dot Plot
-png(paste0(output_prefix, "blaze_transcript_markers_dotplot.ENSG00000131095.png"), width = 1024, height = 768)
-
-DotPlot(object = seurat_obj,
-        features = unique(markers.blaze),
-        group.by = "seurat_clusters",
-        assay = "RNA",
-        col.min= -1.5,
-        col.max= 1.5,
-        scale= TRUE,
-        cluster.idents=FALSE,
-        cols = "RdYlBu")  + coord_flip()
-
-dev.off()
-#### CELL MAKERS - BLAZE TRANSCRIPT MARKERS (ENSG00000176165) ####
-
-# These markers are the transcripts of the gene in the header + all overlapping
-# transcripts. These were included because when comparing only the transcripts,
-# the markers were not found so the marker list was expanded to include all
-# overlapping markers
-#markers.blaze <-c("ENST00000706482.1",
-#                  "ENST00000313071.7",
-#                  "ENST00000658593.1",
-#                  "ENST00000551395.5",
-#                  "ENST00000546560.5",
-#                  "ENST00000549487.1",
-#                  "ENST00000706482.1",
-#                  "ENST00000313071.7",
-#                  "ENST00000675861.1",
-#                  "ENST00000675861.1",
-#                  "ENST00000622740.3",
-#                  "ENST00000399387.9",
-#                  "ENST00000668749.1",
-#                  "ENST00000689292.1",
-#                  "ENST00000548213.3",
-#                  "ENST00000552957.6",
-#                  "ENST00000653638.1",
-#                  "ENST00000671672.1")
-
-# This marker list contains ONLY the transcripts that are apart of the gene
-markers.blaze <-c("ENST00000706482.1",
-                  "ENST00000313071.7")
-
-# Feature Plot
-png(paste0(output_prefix, "blaze_transcript_markers_featureplot.ENSG00000176165.png"), width = 1024, height = 768)
-
-FeaturePlot(object = seurat_obj,
-            features = unique(markers.blaze),
-            reduction = "umap")
-
-dev.off()
-
-# Violin Plot
-png(paste0(output_prefix, "blaze_transcript_markers_violinplot.ENSG00000176165.png"), width = 1024, height = 768)
-
-VlnPlot(object = seurat_obj,
-        split.by = "seurat_clusters",
-        features = unique(markers.blaze),
-        assay = "RNA")
-
-dev.off()
-
-# Dot Plot
-png(paste0(output_prefix, "blaze_transcript_markers_dotplot.ENSG00000176165.png"), width = 1024, height = 768)
-
-DotPlot(object = seurat_obj,
-        features = unique(markers.blaze),
-        group.by = "seurat_clusters",
-        assay = "RNA",
-        col.min= -1.5,
-        col.max= 1.5,
-        scale= TRUE,
-        cluster.idents=FALSE,
-        cols = "RdYlBu")  + coord_flip()
-
-dev.off()
-#### CELL MAKERS - BLAZE TRANSCRIPT MARKERS (ENSG00000162374) ####
-markers.blaze <-c("ENST00000651693.1",
-                  "ENST00000463650.2",
-                  "ENST00000448907.7",
-                  "ENST00000652252.1",
-                  "ENST00000371827.5",
-                  "ENST00000651347.1",
-                  "ENST00000357083.8",
-                  "ENST00000650764.1",
-                  "ENST00000494555.2",
-                  "ENST00000371824.7",
-                  "ENST00000371823.8",
-                  "ENST00000652693.1",
-                  "ENST00000371819.1",
-                  "ENST00000651258.1",
-                  "ENST00000652353.1",
-                  "ENST00000371821.6",
-                  "ENST00000652274.1",
-                  "ENST00000492299.2",
-                  "ENST00000474675.1")
-
-# Feature Plot
-png(paste0(output_prefix, "blaze_transcript_markers_featureplot.ENSG00000162374.png"), width = 1024, height = 768)
-
-FeaturePlot(object = seurat_obj,
-            features = unique(markers.blaze),
-            reduction = "umap")
-
-dev.off()
-
-# Violin Plot
-png(paste0(output_prefix, "blaze_transcript_markers_violinplot.ENSG00000162374.png"), width = 1024, height = 768)
-
-VlnPlot(object = seurat_obj,
-        split.by = "seurat_clusters",
-        features = unique(markers.blaze),
-        assay = "RNA")
-
-dev.off()
-
-# Dot Plot
-png(paste0(output_prefix, "blaze_transcript_markers_dotplot.ENSG00000162374.png"), width = 1024, height = 768)
-
-DotPlot(object = seurat_obj,
-        features = unique(markers.blaze),
-        group.by = "seurat_clusters",
-        assay = "RNA",
-        col.min= -1.5,
-        col.max= 1.5,
-        scale= TRUE,
-        cluster.idents=FALSE,
-        cols = "RdYlBu")  + coord_flip()
-
-dev.off()
-#### CELL MAKERS - BLAZE TRANSCRIPT MARKERS (ENSG00000171786) ####
-markers.blaze <-c("ENST00000302101.6")
-
-# Feature Plot
-png(paste0(output_prefix, "blaze_transcript_markers_featureplot.ENSG00000171786.png"), width = 1024, height = 768)
-
-FeaturePlot(object = seurat_obj,
-            features = unique(markers.blaze),
-            reduction = "umap")
-
-dev.off()
-
-# Violin Plot
-png(paste0(output_prefix, "blaze_transcript_markers_violinplot.ENSG00000171786.png"), width = 1024, height = 768)
-
-VlnPlot(object = seurat_obj,
-        split.by = "seurat_clusters",
-        features = unique(markers.blaze),
-        assay = "RNA")
-
-dev.off()
-
-# Dot Plot
-png(paste0(output_prefix, "blaze_transcript_markers_dotplot.ENSG00000171786.png"), width = 1024, height = 768)
-
-DotPlot(object = seurat_obj,
-        features = unique(markers.blaze),
-        group.by = "seurat_clusters",
-        assay = "RNA",
-        col.min= -1.5,
-        col.max= 1.5,
-        scale= TRUE,
-        cluster.idents=FALSE,
-        cols = "RdYlBu")  + coord_flip()
-
-dev.off()
-#### CELL MAKERS - BLAZE TRANSCRIPT MARKERS (ENSG00000148123) ####
-markers.blaze <-c("ENST00000374874.8",
-                  "ENST00000456287.5",
-                  "ENST00000494890.5",
-                  "ENST00000395056.2",
-                  "ENST00000463206.1")
-
-# Feature Plot
-png(paste0(output_prefix, "blaze_transcript_markers_featureplot.ENSG00000148123.png"), width = 1024, height = 768)
-
-FeaturePlot(object = seurat_obj,
-            features = unique(markers.blaze),
-            reduction = "umap")
-
-dev.off()
-
-# Violin Plot
-png(paste0(output_prefix, "blaze_transcript_markers_violinplot.ENSG00000148123.png"), width = 1024, height = 768)
-
-VlnPlot(object = seurat_obj,
-        split.by = "seurat_clusters",
-        features = unique(markers.blaze),
-        assay = "RNA")
-
-dev.off()
-
-# Dot Plot
-png(paste0(output_prefix, "blaze_transcript_markers_dotplot.ENSG00000148123.png"), width = 1024, height = 768)
-
-DotPlot(object = seurat_obj,
-        features = unique(markers.blaze),
-        group.by = "seurat_clusters",
-        assay = "RNA",
-        col.min= -1.5,
-        col.max= 1.5,
-        scale= TRUE,
-        cluster.idents=FALSE,
-        cols = "RdYlBu")  + coord_flip()
-
-dev.off()
+plot_markers_by_mtx(seurat_obj,
+                    markers,
+                    feature_type,
+                    paste0(output_prefix, "/markers/"),
+                    '')
