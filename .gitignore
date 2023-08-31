@@ -1,0 +1,8 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.bash_history
+.local
+.config
+tertiary_analysis/input/isoquant/*
