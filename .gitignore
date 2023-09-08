@@ -6,3 +6,4 @@
 .local
 .config
 tertiary_analysis/input/isoquant/*
+tertiary_analysis/input/references/*.gtf
