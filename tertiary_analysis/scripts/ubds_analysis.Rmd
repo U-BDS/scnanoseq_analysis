@@ -1,3 +1,21 @@
+---
+title: "scnanoseq - BLAZE analysis"
+author:
+  - name: "Austyn Trull"
+  - name: "Lara Ianov, Ph.D."
+output:
+  html_document:
+    code_folding: hide
+    css: "style.css"
+    toc: true
+    toc_float: true
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
 set.seed(1234)
 
 # Set the current directory to the dir above the current directory to access inputs easier
@@ -15,6 +33,9 @@ library(clustree)
 # Install the UBDS R scripts
 lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/", x)))
 
+```
+
+```{r}
 #### CONSTANT DEFS ####
 
 feature_type <- 'transcript'
@@ -27,9 +48,11 @@ project_name <- "isoquant_q20_seurat"
 
 # The prefix to output files
 output_prefix <- paste0("./output/isoquant/q20/", feature_type, "/")
+```
 
-#### PREPARE INPUT DATA ####
+# PREPARE INPUT DATA
 
+```{r}
 dir.create(file.path(output_prefix), recursive = TRUE)
 
 # Read in the matrices
@@ -44,9 +67,12 @@ seurat_obj <- CreateSeuratObject(counts = cell_bc_matrix,
                                  min.cells = 1,
                                  min.features = 1,
                                  project = project_name)
+```
 
-#### GENERATE QC'S ####
 
+# GENERATE QC'S
+
+```{r}
 # MITOCHONDRIAL PERCENT
 seurat_obj <- PercentageFeatureSet(object = seurat_obj,
                                    pattern = "^mt-",
@@ -183,13 +209,20 @@ cell_count <- FetchData(object = seurat_obj, vars = "orig.ident") %>%
               tally(name = "Cells_before_filtering")
 
 write.csv(cell_count, paste0(output_prefix, "cell_count_prefilter.csv"), row.names = FALSE)
+```
 
-#### FILTERING ####
 
+# FILTERING
+
+```{r}
 seurat_obj <- subset(seurat_obj, subset = nFeature_RNA > 200 & nFeature_RNA < 999999)
 #seurat_obj <- subset(seurat_obj, subset = nFeature_RNA > 200)
+````
 
-#### GENERATE POST-FILTER QC's ####
+
+# POST-FILTER QC's
+
+```{r}
 # VIOLIN PLOTS
 post_filter_violin <- paste0(output_prefix, "violin_postfilter.pdf")
 
@@ -320,25 +353,36 @@ cell_count <- FetchData(object = seurat_obj, vars = "orig.ident") %>%
   tally(name = "Cells_after_filtering")
 
 write.csv(cell_count, paste0(output_prefix, "cell_count_postfilter.csv"), row.names = FALSE)
+```
 
-#### NORMALIZATION ####
+
+# NORMALIZATION
+```{r}
 seurat_obj <- NormalizeData(seurat_obj, 
                             normalization.method = "LogNormalize", 
                             scale.factor = 10000)
+```
 
-#### FIND VARIABLE FEATURES ####
+# FIND VARIABLE FEATURES
+
+```{r}
 seurat_obj <- FindVariableFeatures(seurat_obj, 
                                    selection.method = "vst", 
                                    assay = "RNA",
                                    nfeatures = 2000)
+```
+# SCALE DATA
 
-#### SCALE DATA ####
+```{r}
 # Scaling the data
 all.genes <- rownames(seurat_obj)
 # Default behavior is to only scale the 2000 most variable features
 seurat_obj <- ScaleData(seurat_obj, features = all.genes)
+```
 
-#### PCA #####
+# PCA
+
+```{r}
 # WHY DIFFERENT?
 seurat_obj <- RunPCA(seurat_obj, 
                      features = VariableFeatures(object = seurat_obj))
@@ -368,12 +412,11 @@ co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.03), decreas
 
 # last point where change of % of variation is more than 0.1%.
 co2
+```
 
+# DIMENSIONS AND RESOLUTIONS
 
-####
-
-#### DIMENSIONS AND RESOLUTIONS ####
-
+```{r}
 dim_output_dir <- paste0(output_prefix,"dims_res_explore/")
 dir.create(dim_output_dir)
 
@@ -416,8 +459,11 @@ for (i in seq(cluster_res)){
 
 rm(seurat_obj_tmp)
 gc()
+```
 
-#### CLUSTREE ####
+## CLUSTREE
+
+```{r}
 dim_output_dir <- paste0(output_prefix,"dims_res_explore/")
 dir.create(dim_output_dir)
 
@@ -449,9 +495,11 @@ dev.off()
 
 rm(tmp_seurat_clustree)
 gc()
+```
 
-#### CLUSTER ####
+## CLUSTER
 
+```{r}
 #final_dim <- 5
 final_res <- 0.7
 
@@ -489,8 +537,11 @@ png(paste0(output_prefix, "UMAPs_RNA.png"),
 #plot(p1 + p2 + p3)
 plot(p2 + p3)
 dev.off()
+```
 
-#### INITIAL CLUSTER QC ####
+# INITIAL CLUSTER QC
+
+```{r}
 p1 <- DimPlot(seurat_obj,
               split.by = "orig.ident",
               reduction = "umap")
@@ -514,10 +565,11 @@ relevant_markers <- seurat_obj.markers %>%
   slice_max(n = 20, order_by = avg_log2FC)
 
 write.csv(relevant_markers, paste0(output_prefix, "top_markers.csv"), row.names = FALSE)
+```
 
+# MARKER FUNCTIONS
 
-#### MARKER FUNCTIONS ####
-
+```{r}
 plot_markers_by_mtx <- function(seurat_obj_mtx,
                                 marker_mtx,
                                 feature,
@@ -602,8 +654,11 @@ plot_markers_by_list <- function(seurat_obj_lst,
   dev.off()
   
 }
+```
 
-#### BLAZE MARKERS ####
+# BLAZE MARKERS
+
+```{r}
 markers <- read.table("input/references/blaze_markers.csv",
                       sep=",",
                       header = TRUE,
@@ -614,3 +669,4 @@ plot_markers_by_mtx(seurat_obj,
                     feature_type,
                     paste0(output_prefix, "/markers/"),
                     '')
+```
