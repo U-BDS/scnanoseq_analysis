@@ -18,36 +18,32 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 set.seed(1234)
 
-# Set the current directory to the dir above the current directory to access inputs easier
-#curr_dir <- getwd()
-#setwd(paste0(curr_dir,"/.."))
-
 library(ggplot2)
 library(Seurat)
 library(dplyr)
 library(grid)
 library(sctransform)
-library(biomaRt)
 library(clustree)
+library(rtracklayer)
 
-# Install the UBDS R scripts
+# add custom functions from UBDS R scripts
 lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/", x)))
-
 ```
 
 ```{r}
 #### CONSTANT DEFS ####
 
-feature_type <- 'transcript'
+## The prefix to output files
+output_prefix <- "./output"
 
-# The path to the input file
-in_file <- paste0("input/isoquant/q20.", feature_type, "_counts.tsv")
+# input files (sample and feature type [gene/transcript])
+in_files <- dir("./input/isoquant",full.names = TRUE)
+in_files
 
-# The name of the project to use in seurat
-project_name <- "isoquant_q20_seurat"
-
-# The prefix to output files
-output_prefix <- paste0("./output/isoquant/q20/", feature_type, "/")
+# sample names with feature type
+basenames <- dir("./input/isoquant",full.names = FALSE)
+basenames <- gsub("_.*","",basenames)
+basenames
 ```
 
 # PREPARE INPUT DATA
@@ -56,17 +52,25 @@ output_prefix <- paste0("./output/isoquant/q20/", feature_type, "/")
 dir.create(file.path(output_prefix), recursive = TRUE)
 
 # Read in the matrices
-cell_bc_matrix <- read.table(in_file,
-                             sep="\t",
-                             header = TRUE,
-                             row.names = 1)
+# At this time, gene and transcript will be part of the same list.
+# If needed, feature type can be split at a later time
+cell_bc_matrix <- lapply(setNames(in_files,
+                                 make.names(basenames)),
+               read.table, sep = "\t", header = TRUE, row.names = 1)
 
 # Create the seurat object using RNA Assay
-seurat_obj <- CreateSeuratObject(counts = cell_bc_matrix,
-                                 assay = "RNA",
-                                 min.cells = 1,
-                                 min.features = 1,
-                                 project = project_name)
+seurat_objs <- mapply(FUN = function(x,y) {
+  
+  seurat_obj <- CreateSeuratObject(
+    counts = x,
+    assay = "RNA",
+    min.cells = 1,
+    min.features = 1,
+    project = y)
+  
+  return(seurat_obj)
+  
+}, x=cell_bc_matrix, y=names(cell_bc_matrix))
 ```
 
 
@@ -74,386 +78,497 @@ seurat_obj <- CreateSeuratObject(counts = cell_bc_matrix,
 
 ```{r}
 # MITOCHONDRIAL PERCENT
-seurat_obj <- PercentageFeatureSet(object = seurat_obj,
-                                   pattern = "^mt-",
-                                   col.name = "percent.mt",
-                                   assay = "RNA")
 
-# VIOLIN PLOTS
-pre_filter_violin <- paste0(output_prefix, "violin_prefilter.pdf")
+# below can be used if we have gene names and transcript names (transcript names to be carefully checked for pattern)
+#seurat_objs <- lapply(X = seurat_objs, FUN = function(x) {
+  
+  #RNA_MT <- PercentageFeatureSet(object = x, pattern = "^MT-", col.name = "percent.mt", assay = "RNA")
+  
+#})
 
-pdf(file = pre_filter_violin,
-    width = 8,
-    height = 6)
+#--- Fetch MT features ids ---
+# Since currently working with, IDs, they need to be brought in to quantify MT counts
 
-plot(
-  VlnPlot(object = seurat_obj,
-          features = c("nFeature_RNA", "nCount_RNA","percent.mt"),
-          ncol = 3,
-          assay = "RNA")
-  )
+# import gtf
+hg38_gtf_gr <- rtracklayer::import("./input/references/gencode.v40.annotation.gtf")
 
+# specify genome
+genome(hg38_gtf_gr) <- "GRCh38"
+
+hg38_gtf_gr
+
+### fetch gene names associated with chrM ###
+
+# make vector of all gene names mapped to chrM
+hg38_mito_gene_ids <- as.data.frame(hg38_gtf_gr) %>%
+  filter(seqnames == "chrM", type == "gene") %>%
+  select(seqnames, gene_id, gene_name, gene_type)
+
+# make vector of all transcript names mapped to chrM
+hg38_mito_transcript_ids <- as.data.frame(hg38_gtf_gr) %>%
+  filter(seqnames == "chrM", type == "transcript") %>%
+  select(seqnames, transcript_id, transcript_name, gene_type)
+
+# identify which gene/transcripts are present in the sample(s), and keep only those which are present (prevents error in Seurat)
+
+# create an obj which holds feature_type per object in main list
+feature_type <- gsub(".*\\.","",names(seurat_objs))
+
+ids_per_obj <- mapply(FUN = function(x,y) {
+  
+  if (y == "gene") {
+    
+    obj_id <- hg38_mito_gene_ids
+    
+    # which MT genes are in the object
+    obj_id$in_data <- hg38_mito_gene_ids$gene_id %in% rownames(x@assays$RNA@counts)
+    
+    # keep only those which are in the obj
+    obj_id <- dplyr::filter(obj_id, in_data==TRUE)
+  
+  } else {
+    
+    obj_id <- hg38_mito_transcript_ids
+    
+    # which MT transcripts are in the object
+    obj_id$in_data <- hg38_mito_transcript_ids$transcript_id %in% rownames(x@assays$RNA@counts)
+    
+    # keep only those which are in the obj
+    obj_id <- dplyr::filter(obj_id, in_data==TRUE)
+    
+  }
+  
+  return(obj_id)
+  
+}, x=seurat_objs, y=feature_type, SIMPLIFY = FALSE)
+
+# --- add percentages based on per sample ids ---
+seurat_objs <- mapply(FUN = function(x,y) {
+  
+  RNA_MT <- PercentageFeatureSet(object = x,
+                                 features = y[,2], # 2nd col for gene/transcript ids
+                                 col.name = "percent.mt",
+                                 assay = "RNA")
+  
+}, x=seurat_objs, y=ids_per_obj)
+
+# brief look at the metadata
+
+lapply(X = seurat_objs, FUN = function(x) {
+    
+    head(x@meta.data)
+
+})
+```
+
+```{r}
+# VIOLIN AND FEATURESCATTER, PRE-FILTER QC
+
+mapply(FUN = function(x,y) {
+  
+  file_name1 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_violin_plot_pre_filter.pdf")
+  file_name2 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_scatter_pre_filter.pdf")
+  
+  pdf(file = file_name1,
+      width = 8,
+      height = 6)
+  
+  plot(VlnPlot(object = x, features = c("nFeature_RNA", "nCount_RNA","percent.mt"), ncol = 3, cols = "#56B4E9", assay = "RNA"))
+  
+  dev.off()
+  
+  
+  pdf(file = file_name2,
+      width = 8,
+      height = 6)
+  
+  plot1 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "percent.mt")
+  plot2 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", cols = "#56B4E9")
+  
+  plot(plot1 + plot2) 
+  
+  dev.off()
+  
+  
+}, x = seurat_objs, y = 1:length(seurat_objs))
+```
+
+```{r}
+# Density plots per sample of nFeatures / nCount (unscaled)
+
+all_plot_nFeatureRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nFeature_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = FALSE) +
+  	geom_vline(xintercept = 200)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plot_nCountRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nCount_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = FALSE)  +
+  	geom_vline(xintercept = 500)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plots_overview_nFeature <- cowplot::plot_grid(plotlist = all_plot_nFeatureRNA)
+all_plots_overview_nCount <- cowplot::plot_grid(plotlist = all_plot_nCountRNA)
+
+png(paste0(output_prefix, "/nFeature_un_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nFeature)
 dev.off()
 
-# FEATURE SCATTER PLOTS
-pre_filter_scatter <- paste0(output_prefix, "scatter_prefilter.pdf")
+png(paste0(output_prefix, "/nCount_un_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nCount)
+dev.off()
+```
 
-pdf(file = pre_filter_scatter,
-    width = 8,
-    height = 6)
+Scaled version
 
-plot1 <- FeatureScatter(object = seurat_obj,
-                        feature1 = "nCount_RNA",
-                        feature2 = "percent.mt")
+```{r, eval=FALSE}
+# Density plots per sample of nFeatures / nCount (scaled)
 
-plot2 <- FeatureScatter(object = seurat_obj,
-                        feature1 = "nCount_RNA",
-                        feature2 = "nFeature_RNA")
+all_plot_nFeatureRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nFeature_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE) +
+  	geom_vline(xintercept = 200)
+  
+  return(p1)
 
-plot(plot1 + plot2) 
+}, x = seurat_objs, SIMPLIFY = FALSE)
 
+all_plot_nCountRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nCount_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE) +
+  	geom_vline(xintercept = 500)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plots_overview_nFeature <- cowplot::plot_grid(plotlist = all_plot_nFeatureRNA)
+all_plots_overview_nCount <- cowplot::plot_grid(plotlist = all_plot_nCountRNA)
+
+png(paste0(output_prefix, "/nFeature_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nFeature)
 dev.off()
 
-# DENSITY PLOTS - nFeature_RNA unscaled
-pre_filter_feature_dens <- paste0(output_prefix, "nFeature_unscaled_prefiltered_dens.pdf")
-
-pdf(file = pre_filter_feature_dens,
-    width = 8,
-    height = 6)
-
-dens_plot_nfeature <- plotSingleCellDensity(input_obj = seurat_obj,
-                      metadata_variable = "nFeature_RNA",
-                      group.by = "orig.ident",
-                      scale_x_axis = FALSE) +
-  geom_vline(xintercept = 200)
-
-plot(dens_plot_nfeature)
+png(paste0(output_prefix, "/nCount_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nCount)
 dev.off()
+```
 
-# DENSITY PLOTS - nCount_RNA unscaled
-pre_filter_feature_dens <- paste0(output_prefix, "nCount_unscaled_prefiltered_dens.pdf")
 
-pdf(file = pre_filter_feature_dens,
-    width = 8,
-    height = 6)
-
-dens_plot_ncount <- plotSingleCellDensity(input_obj = seurat_obj,
-                      metadata_variable = "nCount_RNA",
-                      group.by = "orig.ident",
-                      scale_x_axis = FALSE)  +
-  geom_vline(xintercept = 500)
-
-plot(dens_plot_ncount)
-dev.off()
-
-# DENSITY PLOTS - nFeature_RNA scaled
-pre_filter_feature_scaled_dens <- paste0(output_prefix, "nFeature_scaled_prefiltered_dens.pdf")
-
-pdf(file = pre_filter_feature_scaled_dens,
-    width = 8,
-    height = 6)
-
-dens_plot_nfeature <- plotSingleCellDensity(input_obj = seurat_obj,
-                                            metadata_variable = "nFeature_RNA",
-                                            group.by = "orig.ident",
-                                            scale_x_axis = TRUE) +
-  geom_vline(xintercept = 200)
-
-plot(dens_plot_nfeature)
-dev.off()
-
-# DENSITY PLOTS - nCount_RNA scaled
-pre_filter_feature_dens_scale <- paste0(output_prefix, "nCount_scaled_prefiltered_dens.pdf")
-
-pdf(file = pre_filter_feature_dens_scale,
-    width = 8,
-    height = 6)
-
-dens_plot_ncount <- plotSingleCellDensity(input_obj = seurat_obj,
-                                          metadata_variable = "nCount_RNA",
-                                          group.by = "orig.ident",
-                                          scale_x_axis = TRUE)  +
-  geom_vline(xintercept = 500)
-
-plot(dens_plot_ncount)
-dev.off()
-
+```{r}
 # Scatter Plot All 3 Variables
 
-mt_prefilter <- FetchData(object = seurat_obj,
-                          vars = c("orig.ident", 
-                                   "nCount_RNA", 
-                                   "nFeature_RNA", 
-                                   "percent.mt")) %>%
-  ggplot(aes(x = nCount_RNA, y = nFeature_RNA, color = percent.mt)) +
-  geom_point() + 
+MT_preFil <- purrr::map_dfr(seurat_objs, ~ FetchData(.x, vars = c("orig.ident", "nCount_RNA", "nFeature_RNA",
+                                       "percent.mt"))) %>% 
+    ggplot(aes(x = nCount_RNA, y = nFeature_RNA, color = percent.mt)) +
+  	geom_point() + 
   scale_colour_gradient(low = "grey90", high = "black", limits = c(0,100)) +
-  stat_smooth(method = lm) +
-  scale_x_log10() + 
-  scale_y_log10() + 
-  theme_classic() +
-  geom_vline(xintercept = 500) +
-  geom_hline(yintercept = 250) +
-  facet_wrap(~orig.ident, scales = "free") +
-  theme_classic()
+  	stat_smooth(method = lm) +
+  	scale_x_log10() + 
+  	scale_y_log10() + 
+  	theme_classic() +
+  	geom_vline(xintercept = 500) +
+  	geom_hline(yintercept = 250) +
+  	facet_wrap(~orig.ident, scales = "free") +
+    theme_classic()
 
-mt_prefilter_name <- paste0(output_prefix, "mt_prefilter.pdf")
-pdf(mt_prefilter_name,
-    width = 8,
-    height = 6)
-plot(mt_prefilter)
+mt_prefilter_name <- paste0(output_prefix, "/mt_prefilter.png")
+png(mt_prefilter_name, width = 1200, height = 800)
+plot(MT_preFil)
 dev.off()
 
 # Save cell count prior to filtering
-cell_count <- FetchData(object = seurat_obj, vars = "orig.ident") %>%
-              tally(name = "Cells_before_filtering")
+cell_count <- purrr::imap_dfr(seurat_objs, ~ FetchData(.x, vars = "orig.ident") %>% 
+                                tally(name = "Cells_before_filtering") %>% 
+                                mutate(Sample = Project(seurat_objs[[.y]]), .before = `Cells_before_filtering`))
 
-write.csv(cell_count, paste0(output_prefix, "cell_count_prefilter.csv"), row.names = FALSE)
+write.csv(cell_count, paste0(output_prefix, "/cell_count_pre_filtering.csv"), row.names = FALSE)
 ```
-
 
 # FILTERING
 
 ```{r}
-seurat_obj <- subset(seurat_obj, subset = nFeature_RNA > 200 & nFeature_RNA < 999999)
-#seurat_obj <- subset(seurat_obj, subset = nFeature_RNA > 200)
-````
-
+# Filtering RNA mito and nFeatures and nCountRNA
+#NOTE: mito % seems a bit high for cortical neuro - a data point to keep in mind from BLAZE data (cutoff at 20% or below)
+seurat_objs <- lapply(X = seurat_objs, FUN = function(x) {
+  
+  RNA_10X <- subset(x = x, subset  =  nFeature_RNA > 200 & nFeature_RNA < 999999 & percent.mt < 20)
+  
+})
+```
 
 # POST-FILTER QC's
 
 ```{r}
 # VIOLIN PLOTS
-post_filter_violin <- paste0(output_prefix, "violin_postfilter.pdf")
 
-pdf(file = post_filter_violin,
-    width = 8,
-    height = 6)
+mapply(FUN = function(x,y) {
+  
+  file_name1 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_violin_plot_post_filter.pdf")
+  file_name2 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_scatter_post_filter.pdf")
+  
+  pdf(file = file_name1,
+      width = 8,
+      height = 6)
+  
+  plot(VlnPlot(object = x, features = c("nFeature_RNA", "nCount_RNA","percent.mt"), ncol = 3, cols = "#56B4E9", assay = "RNA"))
+  
+  dev.off()
+  
+  
+  pdf(file = file_name2,
+      width = 8,
+      height = 6)
+  
+  plot1 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "percent.mt")
+  plot2 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", cols = "#56B4E9")
+  
+  plot(plot1 + plot2) 
+  
+  dev.off()
+  
+  
+}, x = seurat_objs, y = 1:length(seurat_objs))
+```
 
-plot(
-  VlnPlot(object = seurat_obj,
-          features = c("nFeature_RNA", "nCount_RNA","percent.mt"),
-          ncol = 3,
-          assay = "RNA")
-)
+```{r}
+# Density plots per sample of nFeatures / nCount (unscaled)
 
+all_plot_nFeatureRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nFeature_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = FALSE) +
+  	geom_vline(xintercept = 200)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plot_nCountRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nCount_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = FALSE)  +
+  	geom_vline(xintercept = 500)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plots_overview_nFeature <- cowplot::plot_grid(plotlist = all_plot_nFeatureRNA)
+all_plots_overview_nCount <- cowplot::plot_grid(plotlist = all_plot_nCountRNA)
+
+png(paste0(output_prefix, "/nFeature_un_scaled_RNA_post_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nFeature)
 dev.off()
 
-# FEATURE SCATTER PLOTS
-post_filter_scatter <- paste0(output_prefix, "scatter_postfilter.pdf")
+png(paste0(output_prefix, "/nCount_un_scaled_RNA_post_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nCount)
+dev.off()
+```
 
-pdf(file = post_filter_scatter,
-    width = 8,
-    height = 6)
+Scaled version
 
-plot1 <- FeatureScatter(object = seurat_obj,
-                        feature1 = "nCount_RNA",
-                        feature2 = "percent.mt")
+```{r, eval=FALSE}
+# Density plots per sample of nFeatures / nCount (scaled)
 
-plot2 <- FeatureScatter(object = seurat_obj,
-                        feature1 = "nCount_RNA",
-                        feature2 = "nFeature_RNA")
+all_plot_nFeatureRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nFeature_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE) +
+  	geom_vline(xintercept = 200)
+  
+  return(p1)
 
-plot(plot1 + plot2) 
+}, x = seurat_objs, SIMPLIFY = FALSE)
 
+all_plot_nCountRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nCount_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE) +
+  	geom_vline(xintercept = 500)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plots_overview_nFeature <- cowplot::plot_grid(plotlist = all_plot_nFeatureRNA)
+all_plots_overview_nCount <- cowplot::plot_grid(plotlist = all_plot_nCountRNA)
+
+png(paste0(output_prefix, "/nFeature_scaled_RNA_post_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nFeature)
 dev.off()
 
-# DENSITY PLOTS - nFeature_RNA unscaled
-post_filter_feature_dens <- paste0(output_prefix, "nFeature_unscaled_postfiltered_dens.pdf")
-
-pdf(file = post_filter_feature_dens,
-    width = 8,
-    height = 6)
-
-dens_plot_nfeature <- plotSingleCellDensity(input_obj = seurat_obj,
-                                            metadata_variable = "nFeature_RNA",
-                                            group.by = "orig.ident",
-                                            scale_x_axis = FALSE) +
-  geom_vline(xintercept = 200)
-
-plot(dens_plot_nfeature)
+png(paste0(output_prefix, "/nCount_scaled_RNA_post_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nCount)
 dev.off()
+```
 
-# DENSITY PLOTS - nCount_RNA unscaled
-post_filter_feature_dens <- paste0(output_prefix, "nCount_unscaled_postfiltered_dens.pdf")
 
-pdf(file = post_filter_feature_dens,
-    width = 8,
-    height = 6)
-
-dens_plot_ncount <- plotSingleCellDensity(input_obj = seurat_obj,
-                                          metadata_variable = "nCount_RNA",
-                                          group.by = "orig.ident",
-                                          scale_x_axis = FALSE)  +
-  geom_vline(xintercept = 500)
-
-plot(dens_plot_ncount)
-dev.off()
-
-# DENSITY PLOTS - nFeature_RNA scaled
-post_filter_feature_scaled_dens <- paste0(output_prefix, "nFeature_scaled_postfiltered_dens.pdf")
-
-pdf(file = post_filter_feature_scaled_dens,
-    width = 8,
-    height = 6)
-
-dens_plot_nfeature <- plotSingleCellDensity(input_obj = seurat_obj,
-                                            metadata_variable = "nFeature_RNA",
-                                            group.by = "orig.ident",
-                                            scale_x_axis = TRUE) +
-  geom_vline(xintercept = 200)
-
-plot(dens_plot_nfeature)
-dev.off()
-
-# DENSITY PLOTS - nCount_RNA scaled
-post_filter_feature_dens_scale <- paste0(output_prefix, "nCount_scaled_postfiltered_dens.pdf")
-
-pdf(file = post_filter_feature_dens_scale,
-    width = 8,
-    height = 6)
-
-dens_plot_ncount <- plotSingleCellDensity(input_obj = seurat_obj,
-                                          metadata_variable = "nCount_RNA",
-                                          group.by = "orig.ident",
-                                          scale_x_axis = TRUE)  +
-  geom_vline(xintercept = 500)
-
-plot(dens_plot_ncount)
-dev.off()
-
+```{r}
 # Scatter Plot All 3 Variables
 
-mt_postfilter <- FetchData(object = seurat_obj,
-                          vars = c("orig.ident", 
-                                   "nCount_RNA", 
-                                   "nFeature_RNA", 
-                                   "percent.mt")) %>%
-  ggplot(aes(x = nCount_RNA, y = nFeature_RNA, color = percent.mt)) +
-  geom_point() + 
+MT_preFil <- purrr::map_dfr(seurat_objs, ~ FetchData(.x, vars = c("orig.ident", "nCount_RNA", "nFeature_RNA",
+                                       "percent.mt"))) %>% 
+    ggplot(aes(x = nCount_RNA, y = nFeature_RNA, color = percent.mt)) +
+  	geom_point() + 
   scale_colour_gradient(low = "grey90", high = "black", limits = c(0,100)) +
-  stat_smooth(method = lm) +
-  scale_x_log10() + 
-  scale_y_log10() + 
-  theme_classic() +
-  geom_vline(xintercept = 500) +
-  geom_hline(yintercept = 250) +
-  facet_wrap(~orig.ident, scales = "free") +
-  theme_classic()
+  	stat_smooth(method = lm) +
+  	scale_x_log10() + 
+  	scale_y_log10() + 
+  	theme_classic() +
+  	geom_vline(xintercept = 500) +
+  	geom_hline(yintercept = 250) +
+  	facet_wrap(~orig.ident, scales = "free") +
+    theme_classic()
 
-mt_postfilter_name <- paste0(output_prefix, "mt_postfilter.pdf")
-pdf(mt_postfilter_name,
-    width = 8,
-    height = 6)
-plot(mt_postfilter)
+mt_prefilter_name <- paste0(output_prefix, "/mt_postfilter.png")
+png(mt_prefilter_name, width = 1200, height = 800)
+plot(MT_preFil)
 dev.off()
 
 # Save cell count prior to filtering
-cell_count <- FetchData(object = seurat_obj, vars = "orig.ident") %>%
-  tally(name = "Cells_after_filtering")
+cell_count <- purrr::imap_dfr(seurat_objs, ~ FetchData(.x, vars = "orig.ident") %>% 
+                                tally(name = "Cells_after_filtering") %>% 
+                                mutate(Sample = Project(seurat_objs[[.y]]), .before = `Cells_after_filtering`))
 
-write.csv(cell_count, paste0(output_prefix, "cell_count_postfilter.csv"), row.names = FALSE)
+write.csv(cell_count, paste0(output_prefix, "/cell_count_post_filtering.csv"), row.names = FALSE)
 ```
 
-
-# NORMALIZATION
+# NORMALIZATION, VARIABLE FEATURES, SCALING, PCA
 ```{r}
-seurat_obj <- NormalizeData(seurat_obj, 
-                            normalization.method = "LogNormalize", 
-                            scale.factor = 10000)
+seurat_objs <- mapply(FUN = function(x) {
+  
+  seurat_obj <- NormalizeData(x,
+                              assay = "RNA",
+                              scale.factor = 10000,
+                              normalization.method = "LogNormalize",
+                              verbose = TRUE)
+  
+  seurat_obj <- FindVariableFeatures(seurat_obj,
+                                     assay = "RNA",
+                                     selection.method = "vst",
+                                     nfeatures = 2000)
+  
+  # add percent.mt as variable to be regressed
+  seurat_obj <- ScaleData(seurat_obj,
+                          vars.to.regress = "percent.mt")
+  
+  
+  seurat_obj <- RunPCA(seurat_obj, npcs = 50) 
+  
+  return(seurat_obj)
+  
+}, x = seurat_objs, SIMPLIFY = FALSE)
 ```
 
-# FIND VARIABLE FEATURES
-
 ```{r}
-seurat_obj <- FindVariableFeatures(seurat_obj, 
-                                   selection.method = "vst", 
-                                   assay = "RNA",
-                                   nfeatures = 2000)
-```
-# SCALE DATA
-
-```{r}
+### TODO: CHECKING ON CURRENT DEFAULT BEHAVIOR (ANY LARGE DOWNSIDE ON THIS DATASET?)
 # Scaling the data
-all.genes <- rownames(seurat_obj)
+#all.genes <- rownames(seurat_obj)
 # Default behavior is to only scale the 2000 most variable features
-seurat_obj <- ScaleData(seurat_obj, features = all.genes)
+#seurat_obj <- ScaleData(seurat_obj, features = all.genes)
 ```
 
-# PCA
+# ELBOW PLOT
 
 ```{r}
-# WHY DIFFERENT?
-seurat_obj <- RunPCA(seurat_obj, 
-                     features = VariableFeatures(object = seurat_obj))
-#seurat_obj <- RunPCA(seurat_obj, npcs = 50)
-
-elbow_plot <- paste0(output_prefix, "/elbow.pdf")
-pdf(elbow_plot,
-    width = 8,
-    height = 6)
-plot(ElbowPlot(object = seurat_obj,
-               ndims = 50,
-               reduction = "pca"))
-dev.off()
-
-pct <- seurat_obj[["pca"]]@stdev / sum(seurat_obj[["pca"]]@stdev) * 100
-
-# Calculate cumulative percents for each PC
-cumu <- cumsum(pct)
-
-# Determine which PC exhibits cumulative percent greater than 90% and % variation associated with the PC as less than 5
-co1 <- which(cumu > 90 & pct < 5)[1]
-
-co1
-
-# Determine the difference between variation of PC and subsequent PC
-co2 <- sort(which((pct[1:length(pct) - 1] - pct[2:length(pct)]) > 0.03), decreasing = T)[1] + 1
-
-# last point where change of % of variation is more than 0.1%.
-co2
+mapply(FUN = function(x, y) {
+  
+  elbow_plot <- paste0(output_prefix, "/", y , "_elbow.png")
+  
+  png(elbow_plot,
+      width = 480,
+      height = 480)
+  
+  plot(ElbowPlot(object = x,
+                 ndims = 50,
+                 reduction = "pca"))
+  
+  dev.off()
+  
+}, x = seurat_objs, y = names(seurat_objs))
 ```
 
 # DIMENSIONS AND RESOLUTIONS
 
+The loop below will cycle through a set of dimensions (based on elbow plot) and resolutions to aid in a sensible choice of dims and resolution for the integrated object. A temporary object is created for the following process
+
 ```{r}
-dim_output_dir <- paste0(output_prefix,"dims_res_explore/")
-dir.create(dim_output_dir)
+dim_output_dir <- paste0(output_prefix,"/dims_res_explore/")
+
+dir.create(dim_output_dir, recursive = TRUE)
+
+seurat_obj_tmp <- seurat_objs
 
 cluster_res <- seq(from = 0, to = 1, by = 0.1)
-dims <- seq(from = 2, to = 15, by = 1)
 
-seurat_obj_tmp <- seurat_obj
+dim <- seq(from = 5, to = 15, by = 1)
 
-for (i in seq(cluster_res)){
-  for (j in seq(dims)){
-    
-    seurat_obj_tmp <- FindNeighbors(seurat_obj_tmp,
-                              dims = 1:dims[j])
-    
-    seurat_obj_tmp <- FindClusters(seurat_obj_tmp,
-                                   resolution = cluster_res[i])
+res <- tidyr::expand_grid(cluster_res, dim)
 
-    seurat_obj_tmp <- RunUMAP(seurat_obj_tmp,
-                              dims = 1:dims[j])
+for (obj in names(seurat_obj_tmp) ) {
+  
+  out_path <- paste0(dim_output_dir, obj)
+  
+  dir.create(out_path, recursive = TRUE, showWarnings = FALSE)
+  
+  for (i in seq(nrow(res))) {
     
-    file_name <- paste0(dim_output_dir,
-                        "UMAP_dim_",
-                        dims[j],
+    seurat_obj_tmp[[obj]] <- RunUMAP(seurat_obj_tmp[[obj]],
+                                     reduction = "pca", 
+                                     dims = 1:res[i,]$dim)
+    
+    seurat_obj_tmp[[obj]] <- FindNeighbors(seurat_obj_tmp[[obj]],
+                                           reduction = "pca",
+                                           dims = 1:res[i,]$dim)
+    
+    seurat_obj_tmp[[obj]] <- FindClusters(seurat_obj_tmp[[obj]],
+                                          resolution = res[i,]$cluster_res)
+    
+    file_name <- paste0(out_path,"/",
+                        res[i,]$dim,
                         "_res_",
-                        cluster_res[i],
+                        res[i,]$cluster_res,
                         ".png")
     
     png(file_name,
         width = 1200,
         height = 800)
     
-    plot(DimPlot(seurat_obj_tmp,
-                 label = TRUE,
-                 reduction="umap") + 
-          ggtitle(paste0("dim_res:", dims[j], "_", cluster_res[i])))
+    plot(
+      DimPlot(seurat_obj_tmp[[obj]], label = TRUE) + 
+        ggtitle(paste0("Dim_res: ", obj, "_",res[i,]$dim, "_", res[i,]$cluster_res))
+    )
     
     dev.off()
+    
   }
 }
 
@@ -463,35 +578,49 @@ gc()
 
 ## CLUSTREE
 
+For specific chosen, dimension, generate clustree plot(s)
+
 ```{r}
-dim_output_dir <- paste0(output_prefix,"dims_res_explore/")
-dir.create(dim_output_dir)
-
-tmp_seurat_clustree <- seurat_obj
-clustree_res <- seq(from = 0, to = 1, by = 0.1)
+# NOTE: in this case 6 seems fitting for both gene and transcript (q.20 data only so far)
+# When we add additional datasets, if dims change per dataset, this section may need to be updated
 dim <- 6
-#dim <- 14
 
-for (r in seq(clustree_res)){
-  tmp_seurat_clustree <- RunUMAP(tmp_seurat_clustree, 
-                                 reduction = "pca",
-                                 dims = 1:dim)
+tmp_seurat_clustree <- seurat_objs
+
+clustree_res <- seq(from = 0, to = 1, by = 0.1)
+
+res <- tidyr::expand_grid(clustree_res, dim)
+
+for (obj in names(tmp_seurat_clustree) ) {
   
-  tmp_seurat_clustree <- FindNeighbors(tmp_seurat_clustree,
-                                       reduction = "pca",
-                                       dims = 1:dim)
+  out_path <- paste0(dim_output_dir, obj)
   
-  tmp_seurat_clustree <- FindClusters(tmp_seurat_clustree,
-                                      resolution = clustree_res[r])
+  for (i in seq(nrow(res))) {
+    tmp_seurat_clustree[[obj]] <- RunUMAP(tmp_seurat_clustree[[obj]], 
+                                          reduction = "pca",
+                                          dims = 1:dim)
+    
+    tmp_seurat_clustree[[obj]] <- FindNeighbors(tmp_seurat_clustree[[obj]],
+                                                reduction = "pca",
+                                                dims = 1:dim)
+    
+    tmp_seurat_clustree[[obj]] <- FindClusters(tmp_seurat_clustree[[obj]],
+                                               resolution = res[i,]$clustree_res)
+  }
+  
+  # for each object, generate clustree map
+  
+  clustree_plot <- clustree(tmp_seurat_clustree[[obj]])
+  
+  pdf(paste0(out_path, "/",
+             obj,"_", 
+             "clustree.dim_", dim, ".pdf"),
+      width = 8,
+      height = 12)
+  plot(clustree_plot)
+  dev.off()
+  
 }
-
-clustree_plot <- clustree(tmp_seurat_clustree)
-
-pdf(paste0(dim_output_dir, "clustree.dim_", dim, ".pdf"),
-    width = 8,
-    height = 12)
-plot(clustree_plot)
-dev.off()
 
 rm(tmp_seurat_clustree)
 gc()
@@ -499,44 +628,52 @@ gc()
 
 ## CLUSTER
 
+With appropriate dim and res, cluster the objects:
+
 ```{r}
-#final_dim <- 5
-final_res <- 0.7
-
+#NOTE: ### below updated but needs to be reviewed still to a degree. Also all after line 679.
 final_dim <- 6
-#final_res <- 0.4
+final_res <- list(q20.gene = 0.3,
+                  q20.transcript = 0.7)
 
-seurat_obj <- RunUMAP(obj = seurat_obj,
-                      reduction = "pca",
-                      dims = 1:final_dim)
+seurat_objs <- mapply(FUN = function(x, y) {
+  
+  seurat_obj <- RunUMAP(obj = x,
+                        reduction = "pca",
+                        dims = 1:final_dim)
+  
+  seurat_obj <- FindNeighbors(obj = seurat_obj,
+                              reduction = "pca",
+                              dims = 1:final_dim)
+  
+  seurat_obj <- FindClusters(obj = seurat_obj,
+                             resolution = y)
+  
+  return(seurat_obj)
+  
+}, x = seurat_objs, y = final_res)
+```
 
-seurat_obj <- FindNeighbors(obj = seurat_obj,
-                            reduction = "pca",
-                            dims = 1:final_dim)
 
-seurat_obj <- FindClusters(obj = seurat_obj,
-                           resolution = final_res)
-
-# Plot by various characteristics
-#p1 <- DimPlot(seurat_obj,
-#              group.by = "Group",
-#              reduction = "umap")
-
-p2 <- DimPlot(seurat_obj,
-              group.by = "orig.ident",
-              reduction = "umap")
-
-p3 <- DimPlot(seurat_obj,
-              reduction = "umap",
-              label = TRUE)
-
-png(paste0(output_prefix, "UMAPs_RNA.png"),
-    width = 1600,
-    height = 800)
-
-#plot(p1 + p2 + p3)
-plot(p2 + p3)
-dev.off()
+```{r}
+mapply(FUN = function(x, y) {
+  
+  p1 <- DimPlot(x,
+                group.by = "orig.ident",
+                reduction = "umap")
+  
+  p2 <- DimPlot(x,
+                reduction = "umap",
+                label = TRUE)
+  
+  png(paste0(output_prefix, "/", y,"_UMAPs_RNA.png"),
+      width = 1600,
+      height = 800)
+  
+  plot(p1 + p2)
+  dev.off()
+  
+}, x = seurat_objs, y = names(seurat_objs))
 ```
 
 # INITIAL CLUSTER QC
