@@ -488,14 +488,6 @@ seurat_objs <- mapply(FUN = function(x) {
 }, x = seurat_objs, SIMPLIFY = FALSE)
 ```
 
-```{r}
-### TODO: CHECKING ON CURRENT DEFAULT BEHAVIOR (ANY LARGE DOWNSIDE ON THIS DATASET?)
-# Scaling the data
-#all.genes <- rownames(seurat_obj)
-# Default behavior is to only scale the 2000 most variable features
-#seurat_obj <- ScaleData(seurat_obj, features = all.genes)
-```
-
 # ELBOW PLOT
 
 ```{r}
@@ -631,7 +623,7 @@ gc()
 With appropriate dim and res, cluster the objects:
 
 ```{r}
-#NOTE: ### below updated but needs to be reviewed still to a degree. Also all after line 679.
+#NOTE: list to res needs to be updated for additional samples. Dim may also need to be changed (once PromethION is added etc.)
 final_dim <- 6
 final_res <- list(q20.gene = 0.3,
                   q20.transcript = 0.7)
@@ -679,118 +671,59 @@ mapply(FUN = function(x, y) {
 # INITIAL CLUSTER QC
 
 ```{r}
-p1 <- DimPlot(seurat_obj,
-              split.by = "orig.ident",
-              reduction = "umap")
-
-png(paste0(output_prefix, "UMAPS_RNA_by_sample.png"),
-    width = 1800,
-    height = 800)
-plot(p1)
-dev.off()
-
-#### CELL MARKERS - FIND ALL MARKERS ####
-seurat_obj.markers <- FindAllMarkers(seurat_obj,
-                                     only.pos = TRUE,
-                                     min.pct = 0.25,
-                                     logfc.threshold = 0.25)
-# Gene markers across clusters
-
-# Just looking at top 10
-relevant_markers <- seurat_obj.markers %>%
-  group_by(cluster) %>%
-  slice_max(n = 20, order_by = avg_log2FC)
-
-write.csv(relevant_markers, paste0(output_prefix, "top_markers.csv"), row.names = FALSE)
+mapply(FUN = function(x, y) {
+  
+  p1 <- FeaturePlot(x,
+                    features = "nFeature_RNA",
+                    reduction = "umap")
+  
+  p2 <- FeaturePlot(x,
+                    features = "nCount_RNA",
+                    reduction = "umap")
+  
+  png(paste0(output_prefix, "/", y,"_nFeatures_nCounts_FeaturePlot.png"),
+      width = 800,
+      height = 800)
+  
+  plot(p1 + p2)
+  dev.off()
+  
+}, x = seurat_objs, y = names(seurat_objs))
 ```
 
-# MARKER FUNCTIONS
+# FindAllMarkers
 
 ```{r}
-plot_markers_by_mtx <- function(seurat_obj_mtx,
-                                marker_mtx,
-                                feature,
-                                out_dir_mtx = './marker_plots/', 
-                                out_prefix_mtx = ''){
-  # This will grab the correct columns from the matrix and try to plot the 
-  # markers for the seurat object. This will also create help split up markers
-  # in the case for the transcript so they are easily navigable.
-  if (feature == 'gene'){
-    plot_markers_by_list(seurat_obj_mtx,
-                         unique(marker_mtx$gene),
-                         paste0(out_dir_mtx, feature, '/'),
-                         out_prefix_mtx)
-    
-  } else if (feature == 'transcript'){
-    for (g in unique(marker_mtx$gene)){
-      t <- marker_mtx[marker_mtx$gene == g,]$transcript
-      
-      # TODO: Find an R way to do this, need to find out how to check if markers exist
-      tryCatch({
-        plot_markers_by_list(seurat_obj_mtx,
-                             unique(t),
-                             paste0(out_dir_mtx, feature, '/'),
-                             paste0(g, '.'))
-      }, error = function(e){print(e)})
-    }
-  }
-}
+#### CELL MARKERS - FIND ALL MARKERS ####
+# FindAllMarkers to recapitulate original analysis
 
-plot_markers_by_list <- function(seurat_obj_lst, 
-                                 marker_lst,
-                                 out_dir_lst = './marker_plots/',
-                                 out_prefix_lst = ''){
-  # Given a list of markers, this will generate a feature plot, violin plot,
-  # and a dot plot for the seurat object that is passed in
-  dir.create(file.path(out_dir_lst), recursive = TRUE)
-
-  # Feature Plot
-  png(paste0(out_dir_lst, out_prefix_lst, "markers_featureplot.png"),
-      width = 1024,
-      height = 768)
+mapply(FUN = function(x, y) {
   
-  print(
-    FeaturePlot(object = seurat_obj_lst,
-                features = marker_lst,
-                reduction = "umap")
-  )
-
-  dev.off()
+  markers <- FindAllMarkers(x,
+                            only.pos = TRUE,
+                            min.pct = 0.25,
+                            logfc.threshold = 0.25,
+                            slot = "data")
   
-  # Violin Plot
-  png(paste0(out_dir_lst, out_prefix_lst, "markers_violinplot.png"),
-      width = 1024,
-      height = 768)
-
-  print(
-    VlnPlot(object = seurat_obj_lst,
-            split.by = "seurat_clusters",
-            features = marker_lst,
-            assay = "RNA")
-  )
-
-  dev.off()
+  #top 20 which pass adjusted p-val
+  top_markers <- markers %>%
+    dplyr::filter(p_val_adj <= 0.05) %>%
+    group_by(cluster) %>%
+    slice_max(n = 20, order_by = avg_log2FC)
   
-  # Dot Plot
-  png(paste0(out_dir_lst, out_prefix_lst, "markers_dotplot.png"),
-      width = 1024,
-      height = 768)
   
-  print(
-    DotPlot(object = seurat_obj_lst,
-            features = marker_lst,
-            group.by = "seurat_clusters",
-            assay = "RNA",
-            col.min= -1.5,
-            col.max= 1.5,
-            scale= TRUE,
-            cluster.idents=FALSE,
-            cols = "RdYlBu")  + coord_flip()
-  )
-
-  dev.off()
+  file_name <- paste0(output_prefix, "/", y,"_top_markers.csv")
   
-}
+  write.csv(top_markers,
+            file_name,
+            row.names = FALSE)  
+  
+  # also saving unfiltered version for reference
+  write.csv(markers,
+            paste0(output_prefix, "/", y,"_all_markers.csv"),
+            row.names = FALSE) 
+  
+}, x = seurat_objs, y = names(seurat_objs))
 ```
 
 # BLAZE MARKERS
@@ -801,9 +734,13 @@ markers <- read.table("input/references/blaze_markers.csv",
                       header = TRUE,
                       row.names = NULL)
 
-plot_markers_by_mtx(seurat_obj,
-                    markers,
-                    feature_type,
-                    paste0(output_prefix, "/markers/"),
-                    '')
+mapply(FUN = function(x, y, z) {
+  
+  plot_markers_by_mtx(x,
+                      markers,
+                      z,
+                      paste0(output_prefix, "/markers_", y,"/"),
+                      )
+  
+}, x = seurat_objs, y = names(seurat_objs), z = feature_type)
 ```
