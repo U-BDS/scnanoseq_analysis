@@ -5,5 +5,7 @@
 .bash_history
 .local
 .config
-tertiary_analysis/input/isoquant/*
+tertiary_analysis/input/scnanoseq_data/*
+tertiary_analysis/input/BLAZE_published_data/*
 tertiary_analysis/input/references/*.gtf
+output_*
