@@ -1,8 +1,8 @@
 #' plot_markers_by_mtx
 #' For gene or transcript feature, this functions calls plot_markers_by_list
 #' @param seurat_obj seurat object
-#' @param marker_mtx data.frame of gene and transcript markers. First column must be named "gene", and second "transcript"
-#' @param feature feature type: `gene` or `transcript`
+#' @param marker_mtx data.frame of gene and transcript markers. A columns named  "gene_id", "transcript_id" are expected to be present
+#' @param feature feature type: `gene` or `transcript` (or `trans`)
 #' @param out_dir_mtx output directory
 #' @param out_prefix_mtx output prefix
 #'
@@ -20,8 +20,8 @@ plot_markers_by_mtx <- function(seurat_obj,
   if (feature == 'gene'){
     
     # filter marker to only IDs present in obj:
-    status <- unique(marker_mtx$gene) %in% rownames(seurat_obj@assays$RNA@counts)
-    markers_filtered <- unique(marker_mtx$gene)[status]
+    status <- unique(marker_mtx$gene_id) %in% rownames(seurat_obj@assays$RNA@counts)
+    markers_filtered <- unique(marker_mtx$gene_id)[status]
     
     if (length(markers_filtered > 0)) {
       
@@ -36,10 +36,10 @@ plot_markers_by_mtx <- function(seurat_obj,
       
     }
     
-  } else if (feature == 'transcript'){
+  } else if (feature == 'transcript' | feature == 'trans') {
     
-     for (g in unique(marker_mtx$gene)){
-       transcript_by_gene <- marker_mtx[marker_mtx$gene == g,]$transcript
+     for (g in unique(marker_mtx$gene_id)){
+       transcript_by_gene <- marker_mtx[marker_mtx$gene_id == g,]$transcript_id
        
        # filter marker to only IDs present in obj:
        status <- unique(transcript_by_gene) %in% rownames(seurat_obj@assays$RNA@counts)
