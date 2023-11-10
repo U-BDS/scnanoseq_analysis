@@ -1,0 +1,757 @@
+---
+title: "BLAZE data analysis (ground-truth)"
+author:
+  - name: "Austyn Trull"
+  - name: "Lara Ianov, Ph.D."
+output:
+  html_document:
+    code_folding: hide
+    css: "style.css"
+    toc: true
+    toc_float: true
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This script performs standard post-secondary analysis on the BLAZE data which has been published. This dataset serves as ground-truth, and analyzed data will be compared to the `nf-core/scnanoseq` analysis of the raw BLAZE FASTQs as a critical validation step from the pipeline. The following should be noted regarding the pre-processing of the published BLAZE data:
+
+* Secondary analysis was performed with [FLAMES](https://github.com/mritchielab/FLAMES)
+* Reference information: hg38 GENCODE v31
+* Data sources for matrices imported in this script: <https://melbourne.figshare.com/articles/dataset/Analysis_data_for_BLAZE/20335203>
+
+Please note the following metadata descriptions which are relevant to the processed data used in this analysis:
+
+```
+├── BLAZE_published_data
+│   ├── gene_count_B+F_non_q20_rebase.csv
+│   ├── gene_count_B+F_promith.csv
+│   ├── gene_count_B+F_q20_rebase.csv
+│   ├── trans_count_B+F_non_q20_rebase.csv
+│   ├── trans_count_B+F_promith.csv
+│   └── trans_count_B+F_q20_rebase.csv
+```
+
+`B+F` = BLAZE + FLAMES
+`q20` = ERR9958133 (GridION data generated with the Q20EA kit)
+`non_q20` = ERR9958134 (GridION data generated with the LSK110 kit)
+`promith` = ERR9958135 (PromethION data generated with the LSK110 kit)
+`_rebase` = GridION samples which were basecalled with a different version of Guppy and are representative of published results (see reference: <https://github.com/youyupei/bc_whitelist_analysis/issues/1>)
+
+* Additional details can be found in the published article: <https://genomebiology.biomedcentral.com/articles/10.1186/s13059-023-02907-y>
+
+```{r}
+set.seed(1234)
+
+library(ggplot2)
+library(Seurat)
+library(dplyr)
+library(grid)
+library(sctransform)
+library(clustree)
+library(rtracklayer)
+
+# add custom functions from UBDS R scripts
+lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/", x)))
+```
+
+```{r}
+#### CONSTANT DEFS ####
+
+## The prefix to output files
+output_prefix <- "./output_BLAZE_published_data"
+
+# input files (sample and feature type [gene/transcript])
+in_files <- dir("./input/BLAZE_published_data",full.names = TRUE)
+in_files
+
+# sample names
+sample_names <- dir("./input/BLAZE_published_data",full.names = FALSE)
+sample_names <- gsub(".*F_","",sample_names)
+sample_names <- tools::file_path_sans_ext(gsub("_rebase","",sample_names))
+
+# feature
+feature_type <- dir("./input/BLAZE_published_data",full.names = FALSE)
+feature_type <- gsub("_.*","",feature_type)
+
+# clean basenames with feature type
+basenames <- paste0(sample_names, "_", feature_type)
+basenames
+```
+
+# PREPARE INPUT DATA
+
+```{r}
+dir.create(file.path(output_prefix), recursive = TRUE)
+
+# Read in the matrices
+# At this time, gene and transcript will be part of the same list.
+# If needed, feature type can be split at a later time
+cell_bc_matrix <- lapply(setNames(in_files,
+                                 make.names(basenames)),
+               read.csv, header = TRUE, row.names = 1)
+
+# Create the seurat object using RNA Assay
+seurat_objs <- mapply(FUN = function(x,y) {
+  
+  seurat_obj <- CreateSeuratObject(
+    counts = x,
+    assay = "RNA",
+    min.cells = 1,
+    min.features = 1,
+    project = y)
+  
+  return(seurat_obj)
+  
+}, x=cell_bc_matrix, y=names(cell_bc_matrix))
+```
+
+
+# GENERATE QC'S
+
+```{r}
+# MITOCHONDRIAL PERCENT
+
+# below can be used if we have gene names and transcript names (transcript names to be carefully checked for pattern)
+#seurat_objs <- lapply(X = seurat_objs, FUN = function(x) {
+  
+  #RNA_MT <- PercentageFeatureSet(object = x, pattern = "^MT-", col.name = "percent.mt", assay = "RNA")
+  
+#})
+
+#--- Fetch MT features ids ---
+# Since currently working with, IDs, they need to be brought in to quantify MT counts
+
+# import gtf (GENCODE v31)
+hg38_gtf_gr <- rtracklayer::import("./input/references/gencode.v31.annotation.gtf")
+
+# specify genome
+genome(hg38_gtf_gr) <- "GRCh38"
+
+hg38_gtf_gr
+
+### fetch gene names associated with chrM ###
+
+# make vector of all gene names mapped to chrM
+hg38_mito_gene_ids <- as.data.frame(hg38_gtf_gr) %>%
+  filter(seqnames == "chrM", type == "gene") %>%
+  select(seqnames, gene_id, gene_name, gene_type)
+
+# make vector of all transcript names mapped to chrM
+hg38_mito_transcript_ids <- as.data.frame(hg38_gtf_gr) %>%
+  filter(seqnames == "chrM", type == "transcript") %>%
+  select(seqnames, transcript_id, transcript_name, gene_type)
+
+# identify which gene/transcripts are present in the sample(s), and keep only those which are present (prevents error in Seurat)
+
+ids_per_obj <- mapply(FUN = function(x,y) {
+  
+  if (y == "gene") {
+    
+    obj_id <- hg38_mito_gene_ids
+    
+    # which MT genes are in the object
+    obj_id$in_data <- hg38_mito_gene_ids$gene_id %in% rownames(x@assays$RNA@counts)
+    
+    # keep only those which are in the obj
+    obj_id <- dplyr::filter(obj_id, in_data==TRUE)
+  
+  } else {
+    
+    obj_id <- hg38_mito_transcript_ids
+    
+    # which MT transcripts are in the object
+    obj_id$in_data <- hg38_mito_transcript_ids$transcript_id %in% rownames(x@assays$RNA@counts)
+    
+    # keep only those which are in the obj
+    obj_id <- dplyr::filter(obj_id, in_data==TRUE)
+    
+  }
+  
+  return(obj_id)
+  
+}, x=seurat_objs, y=feature_type, SIMPLIFY = FALSE)
+
+
+lapply(X = ids_per_obj, FUN = function(x) {
+    
+    nrow(x)
+
+})
+```
+
+Since there are no features detected which overlap with GENCODE's v31 mitochondrial IDs, mito % are not added in this analysis. This step is present in the scnonoseq version of the analysis.
+
+```{r}
+# VIOLIN AND FEATURESCATTER, PRE-FILTER QC
+
+mapply(FUN = function(x,y) {
+  
+  file_name1 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_violin_plot_pre_filter.pdf")
+  file_name2 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_scatter_pre_filter.pdf")
+  
+  pdf(file = file_name1,
+      width = 8,
+      height = 6)
+  
+  plot(VlnPlot(object = x, features = c("nFeature_RNA", "nCount_RNA"), ncol = 2, cols = "#56B4E9", assay = "RNA"))
+  
+  dev.off()
+  
+  
+  pdf(file = file_name2,
+      width = 8,
+      height = 6)
+  
+  plot1 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", cols = "#56B4E9")
+  
+  plot(plot1) 
+  
+  dev.off()
+  
+  
+}, x = seurat_objs, y = 1:length(seurat_objs))
+```
+
+```{r}
+# Density plots per sample of nFeatures / nCount (unscaled)
+
+all_plot_nFeatureRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nFeature_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = FALSE) +
+  	geom_vline(xintercept = 200)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plot_nCountRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nCount_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = FALSE)  +
+  	geom_vline(xintercept = 300)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plots_overview_nFeature <- cowplot::plot_grid(plotlist = all_plot_nFeatureRNA)
+all_plots_overview_nCount <- cowplot::plot_grid(plotlist = all_plot_nCountRNA)
+
+png(paste0(output_prefix, "/nFeature_un_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nFeature)
+dev.off()
+
+png(paste0(output_prefix, "/nCount_un_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nCount)
+dev.off()
+```
+
+Scaled version
+
+```{r, eval=FALSE}
+# Density plots per sample of nFeatures / nCount (scaled)
+
+all_plot_nFeatureRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nFeature_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE) +
+  	geom_vline(xintercept = 200)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plot_nCountRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nCount_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE) +
+  	geom_vline(xintercept = 300)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plots_overview_nFeature <- cowplot::plot_grid(plotlist = all_plot_nFeatureRNA)
+all_plots_overview_nCount <- cowplot::plot_grid(plotlist = all_plot_nCountRNA)
+
+png(paste0(output_prefix, "/nFeature_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nFeature)
+dev.off()
+
+png(paste0(output_prefix, "/nCount_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nCount)
+dev.off()
+```
+
+
+```{r}
+# Scatter Plot All Variables (no MT here)
+
+preFil <- purrr::map_dfr(seurat_objs, ~ FetchData(.x, vars = c("orig.ident", "nCount_RNA", "nFeature_RNA"))) %>% 
+    ggplot(aes(x = nCount_RNA, y = nFeature_RNA)) +
+  	geom_point() +
+  	stat_smooth(method = lm) +
+  	scale_x_log10() + 
+  	scale_y_log10() + 
+  	theme_classic() +
+  	facet_wrap(~orig.ident, scales = "free") +
+    theme_classic()
+
+prefilter_name <- paste0(output_prefix, "/prefilter_all_scatters.png")
+png(prefilter_name, width = 1200, height = 800)
+plot(preFil)
+dev.off()
+
+# Save cell count prior to filtering
+cell_count <- purrr::imap_dfr(seurat_objs, ~ FetchData(.x, vars = "orig.ident") %>% 
+                                tally(name = "Cells_before_filtering") %>% 
+                                mutate(Sample = Project(seurat_objs[[.y]]), .before = `Cells_before_filtering`))
+
+write.csv(cell_count, paste0(output_prefix, "/cell_count_pre_filtering.csv"), row.names = FALSE)
+```
+
+# FILTERING
+
+```{r}
+# Filtering nFeatures and nCountRNA
+#-------NOTE: due to differences in depth between GridION and PromethION, initial cutoff for PromethION is being set a bit higher #----
+# This is a general pass at these cutoff for comparisons across the runs.
+# Users from the pipeline are advised to careful consider them and change as needed
+
+nFeature_RNA_min <- c(100, 700, 100, 100, 700, 100)
+
+seurat_objs <- mapply(FUN = function(x,y) {
+  
+  RNA_10X <- subset(x = x, subset  =  nFeature_RNA > y & nFeature_RNA < 999999)
+  
+}, x = seurat_objs, y = nFeature_RNA_min)
+```
+
+# POST-FILTER QC's
+
+```{r}
+# VIOLIN PLOTS
+
+mapply(FUN = function(x,y) {
+  
+  file_name1 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_violin_plot_post_filter.pdf")
+  file_name2 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_scatter_post_filter.pdf")
+  
+  pdf(file = file_name1,
+      width = 8,
+      height = 6)
+  
+  plot(VlnPlot(object = x, features = c("nFeature_RNA", "nCount_RNA"), ncol = 2, cols = "#56B4E9", assay = "RNA"))
+  
+  dev.off()
+  
+  
+  pdf(file = file_name2,
+      width = 8,
+      height = 6)
+  
+  plot1 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", cols = "#56B4E9")
+  
+  plot(plot1) 
+  
+  dev.off()
+  
+  
+}, x = seurat_objs, y = 1:length(seurat_objs))
+```
+
+Scaled version
+
+```{r, eval=FALSE}
+# Density plots per sample of nFeatures / nCount (scaled)
+
+all_plot_nFeatureRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nFeature_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plot_nCountRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nCount_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plots_overview_nFeature <- cowplot::plot_grid(plotlist = all_plot_nFeatureRNA)
+all_plots_overview_nCount <- cowplot::plot_grid(plotlist = all_plot_nCountRNA)
+
+png(paste0(output_prefix, "/nFeature_scaled_RNA_post_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nFeature)
+dev.off()
+
+png(paste0(output_prefix, "/nCount_scaled_RNA_post_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nCount)
+dev.off()
+```
+
+
+```{r}
+# Scatter Plot All Variables
+
+preFil <- purrr::map_dfr(seurat_objs, ~ FetchData(.x, vars = c("orig.ident", "nCount_RNA", "nFeature_RNA"))) %>% 
+    ggplot(aes(x = nCount_RNA, y = nFeature_RNA)) +
+  	geom_point() +
+  	stat_smooth(method = lm) +
+  	scale_x_log10() + 
+  	scale_y_log10() + 
+  	theme_classic() +
+  	facet_wrap(~orig.ident, scales = "free") +
+    theme_classic()
+
+prefilter_name <- paste0(output_prefix, "/postfilter_all_scatters.png")
+png(prefilter_name, width = 1200, height = 800)
+plot(preFil)
+dev.off()
+
+# Save cell count prior to filtering
+cell_count <- purrr::imap_dfr(seurat_objs, ~ FetchData(.x, vars = "orig.ident") %>% 
+                                tally(name = "Cells_after_filtering") %>% 
+                                mutate(Sample = Project(seurat_objs[[.y]]), .before = `Cells_after_filtering`))
+
+write.csv(cell_count, paste0(output_prefix, "/cell_count_post_filtering.csv"), row.names = FALSE)
+```
+
+# NORMALIZATION, VARIABLE FEATURES, SCALING, PCA
+```{r}
+seurat_objs <- mapply(FUN = function(x) {
+  
+  seurat_obj <- NormalizeData(x,
+                              assay = "RNA",
+                              scale.factor = 10000,
+                              normalization.method = "LogNormalize",
+                              verbose = TRUE)
+  
+  seurat_obj <- FindVariableFeatures(seurat_obj,
+                                     assay = "RNA",
+                                     selection.method = "vst",
+                                     nfeatures = 2000)
+  
+  # add percent.mt as variable to be regressed
+  seurat_obj <- ScaleData(seurat_obj)
+  
+  seurat_obj <- RunPCA(seurat_obj, npcs = 50) 
+  
+  return(seurat_obj)
+  
+}, x = seurat_objs, SIMPLIFY = FALSE)
+```
+
+# ELBOW PLOT
+
+```{r}
+mapply(FUN = function(x, y) {
+  
+  elbow_plot <- paste0(output_prefix, "/", y , "_elbow.png")
+  
+  png(elbow_plot,
+      width = 480,
+      height = 480)
+  
+  plot(ElbowPlot(object = x,
+                 ndims = 50,
+                 reduction = "pca"))
+  
+  dev.off()
+  
+}, x = seurat_objs, y = names(seurat_objs))
+```
+
+# DIMENSIONS AND RESOLUTIONS
+
+The loop below will cycle through a set of dimensions (based on elbow plot) and resolutions to aid in a sensible choice of dims and resolution for the integrated object. A temporary object is created for the following process
+
+```{r}
+dim_output_dir <- paste0(output_prefix,"/dims_res_explore/")
+
+dir.create(dim_output_dir, recursive = TRUE)
+
+seurat_obj_tmp <- seurat_objs
+
+cluster_res <- seq(from = 0, to = 1, by = 0.1)
+
+dim <- seq(from = 5, to = 15, by = 1)
+
+res <- tidyr::expand_grid(cluster_res, dim)
+
+for (obj in names(seurat_obj_tmp) ) {
+  
+  out_path <- paste0(dim_output_dir, obj)
+  
+  dir.create(out_path, recursive = TRUE, showWarnings = FALSE)
+  
+  for (i in seq(nrow(res))) {
+    
+    seurat_obj_tmp[[obj]] <- RunUMAP(seurat_obj_tmp[[obj]],
+                                     reduction = "pca", 
+                                     dims = 1:res[i,]$dim)
+    
+    seurat_obj_tmp[[obj]] <- FindNeighbors(seurat_obj_tmp[[obj]],
+                                           reduction = "pca",
+                                           dims = 1:res[i,]$dim)
+    
+    seurat_obj_tmp[[obj]] <- FindClusters(seurat_obj_tmp[[obj]],
+                                          resolution = res[i,]$cluster_res)
+    
+    file_name <- paste0(out_path,"/",
+                        res[i,]$dim,
+                        "_res_",
+                        res[i,]$cluster_res,
+                        ".png")
+    
+    png(file_name,
+        width = 1200,
+        height = 800)
+    
+    plot(
+      DimPlot(seurat_obj_tmp[[obj]], label = TRUE) + 
+        ggtitle(paste0("Dim_res: ", obj, "_",res[i,]$dim, "_", res[i,]$cluster_res))
+    )
+    
+    dev.off()
+    
+  }
+}
+
+rm(seurat_obj_tmp)
+gc()
+```
+
+## CLUSTREE
+
+For specific chosen dimension, generate clustree plot(s)
+
+```{r}
+# NOTE: in this case 5 seems fitting for both gene and transcript level given low complexity of this dataset. Other dimension are also suitable, but minimal difference is observed. For consitency with the original analysis, dim = 5 is chosen
+dim <- 5
+
+tmp_seurat_clustree <- seurat_objs
+
+clustree_res <- seq(from = 0, to = 1, by = 0.1)
+
+res <- tidyr::expand_grid(clustree_res, dim)
+
+for (obj in names(tmp_seurat_clustree) ) {
+  
+  out_path <- paste0(dim_output_dir, obj)
+  
+  for (i in seq(nrow(res))) {
+    tmp_seurat_clustree[[obj]] <- RunUMAP(tmp_seurat_clustree[[obj]], 
+                                          reduction = "pca",
+                                          dims = 1:dim)
+    
+    tmp_seurat_clustree[[obj]] <- FindNeighbors(tmp_seurat_clustree[[obj]],
+                                                reduction = "pca",
+                                                dims = 1:dim)
+    
+    tmp_seurat_clustree[[obj]] <- FindClusters(tmp_seurat_clustree[[obj]],
+                                               resolution = res[i,]$clustree_res)
+  }
+  
+  # for each object, generate clustree map
+  
+  clustree_plot <- clustree(tmp_seurat_clustree[[obj]])
+  
+  pdf(paste0(out_path, "/",
+             obj,"_", 
+             "clustree.dim_", dim, ".pdf"),
+      width = 8,
+      height = 12)
+  plot(clustree_plot)
+  dev.off()
+  
+}
+
+rm(tmp_seurat_clustree)
+gc()
+```
+
+## CLUSTER
+
+With appropriate dim and res, cluster the objects:
+
+```{r}
+#NOTE: 0.7 (matching the original resolution) yields expected results in this version of the analysis across all samples
+final_dim <- 6
+final_res <- 0.7
+
+seurat_objs <- mapply(FUN = function(x) {
+  
+  seurat_obj <- RunUMAP(obj = x,
+                        reduction = "pca",
+                        dims = 1:final_dim)
+  
+  seurat_obj <- FindNeighbors(obj = seurat_obj,
+                              reduction = "pca",
+                              dims = 1:final_dim)
+  
+  seurat_obj <- FindClusters(obj = seurat_obj,
+                             resolution = final_res)
+  
+  return(seurat_obj)
+  
+}, x = seurat_objs)
+```
+
+Plot all UMAPs as a single figures across all original BLAZE datasets
+
+```{r}
+all_UMAPS <- mapply(FUN = function(x, y) {
+  
+  p1 <- DimPlot(x,
+                reduction = "umap",
+                label = FALSE,
+                pt.size = 2) + 
+    guides(color = guide_legend(override.aes = list(size = 8), ncol=1)) +
+    theme(legend.text = element_text(size = 30)) +
+    ggtitle(paste0("BLAZE + FLAMES: ", y))
+  
+  return(p1)
+  
+}, x = seurat_objs, y = names(seurat_objs))
+
+
+png(paste0(output_prefix, "/","All_UMAPS.png"),
+    width = 2000,
+    height = 1200)
+
+gridExtra::grid.arrange(grobs = all_UMAPS)
+
+dev.off()
+```
+
+# INITIAL CLUSTER QC
+
+```{r}
+all_UMAPS_Feature <- mapply(FUN = function(x, y) {
+  
+  p1 <- FeaturePlot(x,
+                    features = "nFeature_RNA",
+                    reduction = "umap") +
+    ggtitle(paste0("BLAZE + FLAMES nFeature: ", y))
+  
+  return(p1)
+  
+}, x = seurat_objs, y = names(seurat_objs))
+
+
+png(paste0(output_prefix, "/","All_nFeature_QC_UMAPs.png"),
+    width = 2000,
+    height = 1200)
+
+gridExtra::grid.arrange(grobs = all_UMAPS_Feature)
+
+dev.off()
+
+
+all_UMAPS_Count <- mapply(FUN = function(x, y) {
+  
+  p1 <- FeaturePlot(x,
+                    features = "nCount_RNA",
+                    reduction = "umap") +
+    ggtitle(paste0("BLAZE + FLAMES nCount: ", y))
+  
+  return(p1)
+  
+}, x = seurat_objs, y = names(seurat_objs))
+
+
+png(paste0(output_prefix, "/","All_nCount_QC_UMAPs.png"),
+    width = 2000,
+    height = 1200)
+
+gridExtra::grid.arrange(grobs = all_UMAPS_Count)
+
+dev.off()
+```
+
+# FindAllMarkers
+
+```{r}
+#### CELL MARKERS - FIND ALL MARKERS ####
+# FindAllMarkers to recapitulate original analysis
+
+mapply(FUN = function(x, y) {
+  
+  markers <- FindAllMarkers(x,
+                            only.pos = TRUE,
+                            min.pct = 0.25,
+                            logfc.threshold = 0.25,
+                            slot = "data")
+  
+  #top 20 which pass adjusted p-val
+  top_markers <- markers %>%
+    dplyr::filter(p_val_adj <= 0.05) %>%
+    group_by(cluster) %>%
+    slice_max(n = 20, order_by = avg_log2FC)
+  
+  
+  file_name <- paste0(output_prefix, "/", y,"_top_markers.csv")
+  
+  write.csv(top_markers,
+            file_name,
+            row.names = FALSE)  
+  
+  # also saving unfiltered version for reference
+  write.csv(markers,
+            paste0(output_prefix, "/", y,"_all_markers.csv"),
+            row.names = FALSE) 
+  
+}, x = seurat_objs, y = names(seurat_objs))
+```
+
+# BLAZE MARKERS
+
+"BLAZE" markers are the gene IDs from the Blaze "Marker gene" analysis. Here we have mapped them to transcript IDs, gene names and transcript names as well.
+
+```{r}
+markers <- read.csv("input/references/blaze_gene_markers_gencode_v31_full.csv", header = TRUE)
+
+mapply(FUN = function(x, y, z) {
+  
+  plot_markers_by_mtx(x,
+                      markers,
+                      z,
+                      paste0(output_prefix, "/markers_", y,"/"),
+                      )
+  
+}, x = seurat_objs, y = names(seurat_objs), z = feature_type)
+```
+
+# SAVE PROCESSED OBJECT
+
+Processed object will be saved for cross-comparisons between the analysis (original BLAZE vs BLAZE processed with `scnanoseq`)
+
+```{r}
+saveRDS(seurat_objs, file = paste0(output_prefix,"/seurat_BLAZE_ground_truth.rds"))
+```
+
+```{r}
+md5 <- paste0("md5sum ", output_prefix, "/seurat_BLAZE_ground_truth.rds", " > ", output_prefix, "/md5sum.txt")
+system(md5)
+```
