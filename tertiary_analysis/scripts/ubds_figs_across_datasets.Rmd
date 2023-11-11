@@ -1,0 +1,132 @@
+---
+title: "scnanoseq BLAZE and BLAZE published: figures"
+author:
+  - name: "Austyn Trull"
+  - name: "Lara Ianov, Ph.D."
+output:
+  html_document:
+    code_folding: hide
+    css: "style.css"
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+set.seed(1234)
+
+library(ggplot2)
+library(Seurat)
+library(dplyr)
+library(grid)
+
+# add custom functions from UBDS R scripts
+lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/", x)))
+
+#### CONSTANT DEFS ####
+
+## The prefix to output files
+output_prefix <- "./output_cross_dataset_figures"
+
+dir.create(file.path(output_prefix), recursive = TRUE)
+```
+
+# Load pre-processed Seurat objects
+
+From our previous analysis for each dataset groups (original BLAZE matrices and BLAZE data re-processed with `nf-core/scnanoseq`), load both objects into the environment
+
+```{r}
+scnanoseq_objs <- readRDS(file = "./output_scnanoseq_data/seurat_scnanoseq_BLAZE.rds")
+blaze_objs <- readRDS(file = "./output_BLAZE_published_data/seurat_BLAZE_ground_truth.rds")
+```
+
+# Subset data to PromethION dataset
+
+Focus on main figures are for the PromethION datasets. Subset the dataset for gene and transcript level data across both analysis
+
+```{r}
+scnanoseq_promith <- scnanoseq_objs[c(5,6)]
+blaze_promith <- blaze_objs[c(2,5)]
+
+scnanoseq_promith
+blaze_promith
+```
+
+# Correlation between datasets for nFeature and nCount
+
+For the cell barcodes from scnanoseq which are present in the blaze set, we compute the correlation between the datasets for nFeature and nCount (for gene and transcript-level ; thus 4 plots total)
+
+```{r}
+# merge metadata based on barcodes from scnanoseq
+
+merged_meta <- mapply(FUN = function(x,y) {
+  
+  scnano_meta <- x@meta.data
+  blaze_meta <- y@meta.data
+  
+  # add BCs as column
+  scnano_meta$cell_barcodes <- rownames(scnano_meta)
+  blaze_meta$cell_barcodes <- rownames(blaze_meta)
+  
+  merged_meta <- merge(x = scnano_meta,
+                       y = blaze_meta,
+                       by = "cell_barcodes",
+                       suffixes= c("_scnanoseq", "_blaze_ground_truth"))
+  
+}, x=scnanoseq_promith, y=blaze_promith, SIMPLIFY = FALSE)
+```
+
+```{r}
+## nFeature scatters ##
+
+# params
+
+feature_type <- gsub(".*_","",names(merged_meta))
+feature_1 <- "nFeature_RNA_scnanoseq"
+feature_2 <- "nFeature_RNA_blaze_ground_truth"
+output_feature <- "_nFeature.png"
+
+mapply(FUN = function(x,y) {
+  
+  scatter_plot <- scatter_corr(data.frame = x,
+                               feature = feature_1,
+                               feature2 = feature_2,
+                               feature_type = y)
+  
+  file_name <- paste0(output_prefix, "/", y, output_feature)
+
+  #adding some room to the right to avoid axis being cutoff
+  png(filename = file_name, height = 800, width = 1000)
+  plot(scatter_plot + theme(plot.margin = margin(t = 20, b = 20, l = 50, r = 50)))
+  dev.off()
+  
+}, x=merged_meta, y=feature_type)
+
+## nCount scatters ##
+
+# params
+
+feature_type <- gsub(".*_","",names(merged_meta))
+feature_1 <- "nCount_RNA_scnanoseq"
+feature_2 <- "nCount_RNA_blaze_ground_truth"
+output_feature <- "_nCount.png"
+
+mapply(FUN = function(x,y) {
+  
+  scatter_plot <- scatter_corr(data.frame = x,
+                               feature = feature_1,
+                               feature2 = feature_2,
+                               feature_type = y)
+  
+  file_name <- paste0(output_prefix, "/", y, output_feature)
+
+  png(filename = file_name, height = 800, width = 1000)
+  plot(scatter_plot + theme(plot.margin = margin(t = 20, b = 20, l = 50, r = 50)))
+  dev.off()
+  
+}, x=merged_meta, y=feature_type)
+```
+
