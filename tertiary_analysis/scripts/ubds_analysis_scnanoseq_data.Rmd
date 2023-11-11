@@ -39,7 +39,6 @@ library(ggplot2)
 library(Seurat)
 library(dplyr)
 library(grid)
-library(sctransform)
 library(clustree)
 library(rtracklayer)
 
