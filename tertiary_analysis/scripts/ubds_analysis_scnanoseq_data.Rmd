@@ -636,7 +636,7 @@ all_UMAPS <- mapply(FUN = function(x, y) {
                 pt.size = 2) + 
     guides(color = guide_legend(override.aes = list(size = 8), ncol=1)) +
     theme(legend.text = element_text(size = 30)) +
-    ggtitle(paste0("BLAZE + FLAMES: ", y))
+    ggtitle(paste0("scnanoseq: ", y))
   
   return(p1)
   
