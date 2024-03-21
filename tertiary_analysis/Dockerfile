@@ -46,7 +46,7 @@ RUN R --no-restore --no-save -e \
                         'SeuratObject'))"
 
 # Bioconductor pacakges
-# as new datasets are released, discovered, some of the additional pacakges
+# as new datasets are released, some of the additional pacakges
 # below will allows us to do more sophisticated analysis for validational purposes
 RUN R --no-restore --no-save -e \
     "BiocManager::install(c('rtracklayer', \
@@ -76,4 +76,4 @@ RUN R --no-restore --no-save -e "devtools::install_github('13308204545/Chord', u
 
 RUN R --no-restore --no-save -e "devtools::install_github('satijalab/seurat-data', upgrade='never')"
 
-RUN R --no-restore --no-save -e "devtools::install_github('satijalab/azimuth', ref = 'v0.4.6' ,upgrade='never')"
+RUN R --no-restore --no-save -e "devtools::install_github('satijalab/azimuth', ref = 'v0.4.6', upgrade='never')"
