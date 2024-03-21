@@ -1,4 +1,4 @@
-FROM bioconductor/bioconductor_docker:RELEASE_3_17
+FROM bioconductor/bioconductor_docker:RELEASE_3_18
 
 LABEL maintainer="Austyn Trull <atrull@uab.edu> and Lara Ianov <lianov@uab.edu>"
 LABEL description="Environment which contains the tools used for evaluating the scnanoseq results"
@@ -42,7 +42,8 @@ RUN R --no-restore --no-save -e \
                         'adabag', \
                         'gbm', \
                         'gprofiler2', \
-                        'rsvd'))"
+                        'rsvd', \
+                        'SeuratObject'))"
 
 # Bioconductor pacakges
 # as new datasets are released, discovered, some of the additional pacakges
@@ -60,7 +61,7 @@ RUN R --no-restore --no-save -e \
                             'scater'))"                   
 
 # Manually install Seurat, not wishing to use use v4.2.0
-RUN R --no-restore --no-save -e "remotes::install_version('Seurat', version='4.3.0',repos='https://cloud.r-project.org', \
+RUN R --no-restore --no-save -e "remotes::install_version('Seurat', version='4.4.0',repos='https://cloud.r-project.org', \
 dependencies=c('Depends', 'Imports', 'LinkingTo'), upgrade='never')"
 
 RUN R --no-restore --no-save -e "remotes::install_version('Matrix.utils', version='0.9.8',repos='https://cloud.r-project.org', \
@@ -72,3 +73,7 @@ RUN R --no-restore --no-save -e "devtools::install_github('chris-mcginnis-ucsf/D
 RUN R --no-restore --no-save -e "devtools::install_github('kostkalab/scds', ref='master', upgrade='never')"
 
 RUN R --no-restore --no-save -e "devtools::install_github('13308204545/Chord', upgrade='never')"
+
+RUN R --no-restore --no-save -e "devtools::install_github('satijalab/seurat-data', upgrade='never')"
+
+RUN R --no-restore --no-save -e "devtools::install_github('satijalab/azimuth', ref = 'v0.4.6' ,upgrade='never')"
