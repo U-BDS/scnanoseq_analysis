@@ -336,7 +336,7 @@ p1 <- VlnPlot(object = scnanoseq_promith$ERR9958135_gene,
   NoLegend() + FontSize(20) + ggtitle("scnanoseq: ERR9958135_gene")
 
 png(paste0(output_prefix, "/","Violins_genes_scnanoseq.png"),
-    width = 800,
+    width = 500,
     height = 800)
 
 plot(p1)
@@ -388,6 +388,28 @@ png(paste0(output_prefix, "/","FeaturePlot_transcripts_scnanoseq.png"),
     height = 800)
 
 gridExtra::grid.arrange(grobs = transcript_feature, top=textGrob("scnanoseq: ERR9958135_transcript\n", gp = gpar(fontsize = 30, fontface = "bold")))
+
+dev.off()
+
+#violin
+p1 <- VlnPlot(object = scnanoseq_promith$ERR9958135_transcript,
+              split.by = "seurat_clusters",
+              features = transcript_id,
+              assay = "RNA",
+              slot = "data",
+              stack = TRUE,
+              flip = TRUE) +
+  theme(axis.title = element_text(size = 20),
+        axis.text.y.left = element_text(size = 20),
+        axis.text.y.right = element_text(size = 20),
+        plot.title = element_text(size = 20)) + 
+  NoLegend() + FontSize(20) + ggtitle("scnanoseq: transcript")
+
+png(paste0(output_prefix, "/","Violins_transcripts_scnanoseq.png"),
+    width = 500,
+    height = 800)
+
+plot(p1)
 
 dev.off()
 ```
@@ -467,7 +489,7 @@ plot(p1)
 
 dev.off()
 
-### Transcript scnanoseq ###
+### Transcript blaze ###
 
 # representative list for illustration purposes
 # based on IDs we will fetch transcript name to be user-friendly
@@ -512,6 +534,29 @@ png(paste0(output_prefix, "/","FeaturePlot_transcripts_ground_truth.png"),
     height = 800)
 
 gridExtra::grid.arrange(grobs = transcript_feature, top=textGrob("Ground Truth: ERR9958135_transcript\n", gp = gpar(fontsize = 30, fontface = "bold")))
+
+dev.off()
+
+
+#violin
+p1 <- VlnPlot(object = blaze_objs$promith_trans,
+              split.by = "seurat_clusters",
+              features = transcript_id,
+              assay = "RNA",
+              slot = "data",
+              stack = TRUE,
+              flip = TRUE) +
+  theme(axis.title = element_text(size = 20),
+        axis.text.y.left = element_text(size = 20),
+        axis.text.y.right = element_text(size = 20),
+        plot.title = element_text(size = 20)) + 
+  NoLegend() + FontSize(20) + ggtitle("Ground Truth: transcript")
+
+png(paste0(output_prefix, "/","Violins_transcripts_ground_truth.png"),
+    width = 500,
+    height = 800)
+
+plot(p1)
 
 dev.off()
 ```

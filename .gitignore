@@ -7,5 +7,7 @@
 .config
 tertiary_analysis/input/scnanoseq_data/*
 tertiary_analysis/input/BLAZE_published_data/*
+tertiary_analysis/input/CellRanger_10X_data/*
+tertiary_analysis/input/scnanoseq_10X_data/*
 tertiary_analysis/input/references/*.gtf
 output_*
