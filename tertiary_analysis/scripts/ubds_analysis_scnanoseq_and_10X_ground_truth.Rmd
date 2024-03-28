@@ -1,0 +1,1611 @@
+---
+title: "scnanoseq - 10X 3' and 5' dataset analysis"
+author:
+  - name: "Austyn Trull"
+  - name: "Lara Ianov, Ph.D."
+output:
+  html_document:
+    code_folding: hide
+    css: "style.css"
+    toc: true
+    toc_float: true
+---
+
+This script performs standard post-secondary analysis on the 10X data 5' and 3' datasets discussed at the following application note: <https://www.10xgenomics.com/library/dea066>. The input data is the scnanoseq outputs (gene and transcript level) of both datasets, along with the Illumina data provided by 10X (ground-truth).
+
+* Reference information: hg38 GENCODE XXXX (# TODO add details with reference matching Illumina run)
+
+The input are the following files from the pipeline:
+
+```
+input/scnanoseq_10X_data/
+├── SC3pv3_GEX_Human_PBMC_ONT.gene_counts.tsv
+├── SC3pv3_GEX_Human_PBMC_ONT.transcript_counts.tsv
+├── SC5pv2_GEX_Human_Lung_Carcinoma_DTC_ONT.gene_counts.tsv
+└── SC5pv2_GEX_Human_Lung_Carcinoma_DTC_ONT.transcript_counts.tsv
+
+input/CellRanger_10X_data/
+├── SC3pv3_GEX_Human_PBMC_filtered_feature_bc_matrix.h5
+└── SC5pv2_GEX_Human_Lung_Carcinoma_DTC_filtered_feature_bc_matrix.h5
+```
+
+
+```{r}
+set.seed(1234)
+
+library(ggplot2)
+library(Seurat)
+library(harmony)
+library(dplyr)
+library(tidyr)
+library(grid)
+library(clustree)
+library(rtracklayer)
+library(AnnotationHub)
+library(Azimuth)
+library(SeuratData)
+
+# add custom functions from UBDS R scripts
+lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/", x)))
+```
+
+```{r}
+#### CONSTANT DEFS ####
+
+## The prefix to output files
+output_prefix <- "./output_scnanoseq_10X_data"
+
+### --- scnanoseq Oxford data --- ###
+# input files (sample and feature type [gene/transcript])
+in_files_scnanoseq <- dir("./input/scnanoseq_10X_data",full.names = TRUE)
+in_files_scnanoseq
+
+# sample names
+sample_names_scnanoseq <- dir("./input/scnanoseq_10X_data",full.names = FALSE)
+sample_names_scnanoseq <- gsub("_.*","",sample_names_scnanoseq)
+
+# feature
+feature_type_scnanoseq <- dir("./input/scnanoseq_10X_data",full.names = FALSE)
+feature_type_scnanoseq <- gsub(".*_ONT.","",feature_type_scnanoseq)
+
+feature_type_scnanoseq <- gsub("_.*","",feature_type_scnanoseq)
+
+feature_type_scnanoseq
+
+# clean basenames with feature type
+basenames_scnanoseq <- paste0(sample_names_scnanoseq, "_", feature_type_scnanoseq)
+basenames_scnanoseq
+
+### --- CellRanger (CR) Illumina data --- ###
+
+in_files_CR <- dir("./input/CellRanger_10X_data",full.names = TRUE)
+in_files_CR
+
+# sample names
+sample_names_CR <- dir("./input/CellRanger_10X_data",full.names = FALSE)
+sample_names_CR <- gsub("_.*","",sample_names_CR)
+
+# only gene-level here
+feature_type_CR <- c("gene", "gene")
+
+# clean basenames with feature type
+basenames_CR <- paste0(sample_names_CR, "_", feature_type_CR, "_illumina")
+basenames_CR
+```
+
+# PREPARE INPUT DATA
+
+Import matrices, perform Ensembl to gene/transcript name conversion, make Seurat objects
+
+```{r}
+dir.create(file.path(output_prefix), recursive = TRUE)
+
+# Read in the matrices
+# At this time, gene and transcript will be part of the same list.
+# If needed, feature type can be split at a later time
+cell_bc_matrix <- lapply(setNames(in_files_scnanoseq,
+                                 make.names(basenames_scnanoseq)),
+               read.table, sep = "\t", header = TRUE, row.names = 1)
+```
+
+Convert Ensembl ids to gene/transcript names for scnanoseq data
+
+
+```{r, eval=FALSE}
+ah <- AnnotationHub()
+```
+
+```{r, eval=FALSE}
+hg38_q <- query(ah, c("Ensembl", "Homo sapiens","106")) ##TODO change to final version we settle (matching original Illumina run)
+hg38_q
+
+hg38_q$title # finding the same gtf we used for generating 10X reference
+
+hg38_annot <- subset(hg38_q, title == "Homo_sapiens.GRCh38.106.gtf")[[1]] ##TODO change to final version we settle
+hg38_annot #info matches the gtf we used in CR_arc
+
+# seqlevels are correct as we mapped to Ensembl genome
+genome(hg38_annot) <- "hg38"
+hg38_annot
+```
+
+```{r}
+#TODO: consider making a log file of Ensemlb and names matched for easy look-up back to ids if needed
+cell_bc_matrix_genes <- mapply(FUN = function(x,y) {
+  
+  if (y == "gene") {
+    
+    id_map <- data.frame(gene_id_version = rownames(x), # keep track of original
+                         gene_id = gsub("\\.[0-9]+","", rownames(x)))
+    
+    # subset reference to metadata needed only
+    
+    hg38_subset <- as.data.frame(hg38_annot) %>%
+      dplyr::filter(type == "gene") %>%
+      dplyr::select(gene_id, gene_name)
+    
+    
+    id_map <- id_map %>%
+      plyr::join(as.data.frame(hg38_subset), by = c("gene_id")) %>%
+      dplyr::mutate(gene_name = ifelse(is.na(gene_name), gene_id, gene_name)) #where gene_name == NA, use ID
+    
+    stopifnot(identical(id_map$gene_id_version, rownames(x)))
+    
+    rownames(x) <- make.names(id_map$gene_name, unique = TRUE)
+    
+  } else {
+    
+    id_map <- data.frame(transcript_id_version = rownames(x), # keep track of original
+                         transcript_id = gsub("\\.[0-9]+","",rownames(x)))
+    
+    # subset reference to metadata needed only
+    
+    hg38_subset <- as.data.frame(hg38_annot) %>%
+      dplyr::filter(type == "transcript") %>%
+      dplyr::select(transcript_id, transcript_name)
+    
+    
+    id_map <- id_map %>%
+      plyr::join(as.data.frame(hg38_subset), by = c("transcript_id")) %>%
+      dplyr::mutate(transcript_name = ifelse(is.na(transcript_name), transcript_id, transcript_name))
+    
+    
+    stopifnot(identical(id_map$transcript_id_version, rownames(x)))
+    
+    rownames(x) <- make.names(id_map$transcript_name, unique = TRUE)
+    
+  }
+  
+  return(x)
+  
+}, x=cell_bc_matrix, y=feature_type_scnanoseq, SIMPLIFY = FALSE)
+```
+
+```{r}
+rm(cell_bc_matrix)
+gc()
+```
+
+## Create Seurat objects
+
+scnanoseq objects
+
+```{r}
+# Create the seurat object using RNA Assay
+seurat_objs_scnanoseq <- mapply(FUN = function(x,y) {
+  
+  seurat_obj <- CreateSeuratObject(
+    counts = x,
+    assay = "RNA",
+    min.cells = 1,
+    min.features = 1,
+    project = y)
+  
+  return(seurat_obj)
+  
+}, x=cell_bc_matrix_genes, y=names(cell_bc_matrix_genes))
+```
+
+CR objects
+
+```{r}
+CR_counts <- lapply(setNames(in_files_CR,
+                             make.names(basenames_CR)),
+                    Read10X_h5)
+
+# Create the seurat object using RNA Assay
+seurat_objs_CR <- mapply(FUN = function(x,y) {
+  
+  seurat_obj <- CreateSeuratObject(
+    counts = x,
+    assay = "RNA",
+    min.cells = 1,
+    min.features = 1,
+    project = y)
+  
+  return(seurat_obj)
+  
+}, x=CR_counts, y=names(CR_counts))
+```
+
+Combining all objects into a single list to easily iterate over all until object integration
+
+```{r}
+seurat_objs <- c(seurat_objs_scnanoseq, seurat_objs_CR)
+```
+
+
+# GENERATE QC'S
+
+```{r}
+# MITOCHONDRIAL PERCENT
+
+# feature names have been checked where general pattern usage below captures all biotypes
+# note that scnanoseq patterns have `.` instead of `-` due to Ensembl to gene name conversion
+
+seurat_objs <- lapply(X = seurat_objs, FUN = function(x) {
+  
+  RNA_MT <- PercentageFeatureSet(object = x, pattern = "^MT-", col.name = "percent.mt", assay = "RNA")
+  RNA_MT <- PercentageFeatureSet(object = x, pattern = "^MT.", col.name = "percent.mt", assay = "RNA")
+  
+})
+
+# brief look at the metadata
+
+lapply(X = seurat_objs, FUN = function(x) {
+    
+    head(x@meta.data)
+
+})
+```
+
+```{r}
+# VIOLIN AND FEATURESCATTER, PRE-FILTER QC
+
+mapply(FUN = function(x,y) {
+  
+  file_name1 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_violin_plot_pre_filter.pdf")
+  file_name2 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_scatter_pre_filter.pdf")
+  
+  pdf(file = file_name1,
+      width = 12,
+      height = 6)
+  
+  plot(VlnPlot(object = x, features = c("nFeature_RNA", "nCount_RNA","percent.mt"), ncol = 3, cols = "#56B4E9", assay = "RNA"))
+  
+  dev.off()
+  
+  
+  pdf(file = file_name2,
+      width = 12,
+      height = 6)
+  
+  plot1 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "percent.mt")
+  plot2 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", cols = "#56B4E9")
+  
+  plot(plot1 + plot2) 
+  
+  dev.off()
+  
+  
+}, x = seurat_objs, y = 1:length(seurat_objs))
+```
+
+```{r}
+# Density plots per sample of nFeatures / nCount (unscaled)
+
+all_plot_nFeatureRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nFeature_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = FALSE) +
+  	geom_vline(xintercept = 200)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plot_nCountRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nCount_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = FALSE)  +
+  	geom_vline(xintercept = 300)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plots_overview_nFeature <- cowplot::plot_grid(plotlist = all_plot_nFeatureRNA)
+all_plots_overview_nCount <- cowplot::plot_grid(plotlist = all_plot_nCountRNA)
+
+png(paste0(output_prefix, "/nFeature_un_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nFeature)
+dev.off()
+
+png(paste0(output_prefix, "/nCount_un_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nCount)
+dev.off()
+```
+
+Scaled version
+
+```{r, eval=FALSE}
+# Density plots per sample of nFeatures / nCount (scaled)
+
+all_plot_nFeatureRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nFeature_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE) +
+  	geom_vline(xintercept = 200)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plot_nCountRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nCount_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE) +
+  	geom_vline(xintercept = 300)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plots_overview_nFeature <- cowplot::plot_grid(plotlist = all_plot_nFeatureRNA)
+all_plots_overview_nCount <- cowplot::plot_grid(plotlist = all_plot_nCountRNA)
+
+png(paste0(output_prefix, "/nFeature_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nFeature)
+dev.off()
+
+png(paste0(output_prefix, "/nCount_scaled_RNA_pre_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nCount)
+dev.off()
+```
+
+
+```{r}
+# Scatter Plot All 3 Variables
+
+MT_preFil <- purrr::map_dfr(seurat_objs, ~ FetchData(.x, vars = c("orig.ident", "nCount_RNA", "nFeature_RNA",
+                                       "percent.mt"))) %>% 
+    ggplot(aes(x = nCount_RNA, y = nFeature_RNA, color = percent.mt)) +
+  	geom_point() + 
+  scale_colour_gradient(low = "grey90", high = "black", limits = c(0,100)) +
+  	stat_smooth(method = lm) +
+  	scale_x_log10() + 
+  	scale_y_log10() + 
+  	theme_classic() +
+  	facet_wrap(~orig.ident, scales = "free") +
+    theme_classic()
+
+mt_prefilter_name <- paste0(output_prefix, "/mt_prefilter.png")
+png(mt_prefilter_name, width = 1200, height = 800)
+plot(MT_preFil)
+dev.off()
+
+# Save cell count prior to filtering
+cell_count <- purrr::imap_dfr(seurat_objs, ~ FetchData(.x, vars = "orig.ident") %>% 
+                                tally(name = "Cells_before_filtering") %>% 
+                                mutate(Sample = Project(seurat_objs[[.y]]), .before = `Cells_before_filtering`))
+
+write.csv(cell_count, paste0(output_prefix, "/cell_count_pre_filtering.csv"), row.names = FALSE)
+```
+
+# Correlation plots between gene-level scnanoseq and CR dataset (pre-filtering)
+
+We generate these prior to any filtering, since filtering based on cutoff are bound to vary on technological differences and other factors (e.g. see note below). Depending on this, the levels of filtration will vary (and downstream correlations will be limited to cells retained in both datasets. But here we show raw as well)
+
+NOTE: upon investigation of what genes are detected (using feature names, rather than pattern), oxford/scnanoseq samples contained a lot more MT genes than Illumina/CR (TODO: add a table showing this, as supplementary?). I also note, several cells here have high MT rates.
+
+```{r}
+# merge metadata based on barcodes from scnanoseq and CR runs (gene-level only)
+
+merged_meta <- mapply(FUN = function(x,y) {
+  
+  scnano_meta <- x@meta.data
+  CR_meta <- y@meta.data
+  
+  # add BCs as column
+  scnano_meta$cell_barcodes <- rownames(scnano_meta)
+  CR_meta$cell_barcodes <- rownames(CR_meta)
+  
+  # 10X CR contains -1 (data imported by keeping them for now, but need to remove for this step)
+  
+  CR_meta$cell_barcodes <- gsub("-1","",CR_meta$cell_barcodes)
+  
+  # merge by keeping all barcodes (not just what is common b/t the two)
+  merged_meta <- merge(x = scnano_meta,
+                       y = CR_meta,
+                       by = "cell_barcodes",
+                       suffixes= c("_scnanoseq", "_ground_truth"),
+                       all = TRUE)
+  
+  # Change NA to 0 to display any barcodes unique to each dataset
+  merged_meta <- merged_meta %>% mutate_if(is.numeric, ~replace_na(., 0))
+  
+}, x=seurat_objs[c(1,3)], y=seurat_objs[c(5,6)], SIMPLIFY = FALSE)
+```
+
+```{r}
+## nFeature scatters ##
+
+# params
+
+feature_1 <- "nFeature_RNA_scnanoseq"
+feature_2 <- "nFeature_RNA_ground_truth"
+output_feature <- "_nFeature_pre_filter.png"
+
+mapply(FUN = function(x,y) {
+  
+  scatter_plot <- scatter_corr(data.frame = x,
+                               feature = feature_1,
+                               feature2 = feature_2,
+                               feature_type = "gene") # just genes here
+  
+  file_name <- paste0(output_prefix, "/", y, output_feature)
+
+  #adding some room to the right to avoid axis being cutoff
+  png(filename = file_name, height = 800, width = 1000)
+  plot(scatter_plot + theme(plot.margin = margin(t = 20, b = 20, l = 50, r = 50)))
+  dev.off()
+  
+}, x=merged_meta, y=names(merged_meta))
+
+## nCount scatters ##
+
+# params
+
+feature_1 <- "nCount_RNA_scnanoseq"
+feature_2 <- "nCount_RNA_ground_truth"
+output_feature <- "_nCount_pre_filter.png"
+
+mapply(FUN = function(x,y) {
+  
+  scatter_plot <- scatter_corr(data.frame = x,
+                               feature = feature_1,
+                               feature2 = feature_2,
+                               feature_type = "gene")
+  
+  file_name <- paste0(output_prefix, "/", y, output_feature)
+
+  png(filename = file_name, height = 800, width = 1000)
+  plot(scatter_plot + theme(plot.margin = margin(t = 20, b = 20, l = 50, r = 50)))
+  dev.off()
+  
+}, x=merged_meta, y=names(merged_meta))
+```
+
+
+# FILTERING
+
+```{r}
+#save object prior to filtering:
+saveRDS(seurat_objs, paste0(output_prefix,"/all_10X_prefilter.rds"))
+```
+
+
+```{r}
+# filtering criteria b/t gene and transcript is != based on QC plot (we do not need to set a higher cutoff for transcript-level)
+nFeature_RNA_min <- c(400, 300, 400, 300, 400, 400)
+
+# filter
+seurat_objs <- mapply(FUN = function(x, y) {
+  
+  RNA_10X <- subset(x = x, subset= nFeature_RNA > y & nCount_RNA > 200 & percent.mt < 10)
+  
+}, x = seurat_objs, y = nFeature_RNA_min)
+```
+
+# POST-FILTER QC's
+
+```{r}
+# VIOLIN PLOTS
+
+mapply(FUN = function(x,y) {
+  
+  file_name1 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_violin_plot_post_filter.pdf")
+  file_name2 <- paste0(output_prefix, "/", names(seurat_objs)[[y]], "_scatter_post_filter.pdf")
+  
+  pdf(file = file_name1,
+      width = 12,
+      height = 6)
+  
+  plot(VlnPlot(object = x, features = c("nFeature_RNA", "nCount_RNA","percent.mt"), ncol = 3, cols = "#56B4E9", assay = "RNA"))
+  
+  dev.off()
+  
+  
+  pdf(file = file_name2,
+      width = 12,
+      height = 6)
+  
+  plot1 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "percent.mt")
+  plot2 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", cols = "#56B4E9")
+  
+  plot(plot1 + plot2) 
+  
+  dev.off()
+  
+  
+}, x = seurat_objs, y = 1:length(seurat_objs))
+```
+
+Scaled version
+
+```{r, eval=FALSE}
+# Density plots per sample of nFeatures / nCount (scaled)
+
+all_plot_nFeatureRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nFeature_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plot_nCountRNA <- mapply(FUN = function(x) {
+  
+  p1 <- plotSingleCellDensity(input_obj = x,
+                              metadata_variable = "nCount_RNA",
+                              group.by = "orig.ident",
+                              scale_x_axis = TRUE)
+  
+  return(p1)
+
+}, x = seurat_objs, SIMPLIFY = FALSE)
+
+all_plots_overview_nFeature <- cowplot::plot_grid(plotlist = all_plot_nFeatureRNA)
+all_plots_overview_nCount <- cowplot::plot_grid(plotlist = all_plot_nCountRNA)
+
+png(paste0(output_prefix, "/nFeature_scaled_RNA_post_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nFeature)
+dev.off()
+
+png(paste0(output_prefix, "/nCount_scaled_RNA_post_filter.png"), width = 1600, height = 1200)
+plot(all_plots_overview_nCount)
+dev.off()
+```
+
+
+```{r}
+# Scatter Plot All 3 Variables
+
+MT_preFil <- purrr::map_dfr(seurat_objs, ~ FetchData(.x, vars = c("orig.ident", "nCount_RNA", "nFeature_RNA",
+                                       "percent.mt"))) %>% 
+    ggplot(aes(x = nCount_RNA, y = nFeature_RNA, color = percent.mt)) +
+  	geom_point() + 
+  scale_colour_gradient(low = "grey90", high = "black", limits = c(0,100)) +
+  	stat_smooth(method = lm) +
+  	scale_x_log10() + 
+  	scale_y_log10() + 
+  	theme_classic() +
+  	facet_wrap(~orig.ident, scales = "free") +
+    theme_classic()
+
+mt_prefilter_name <- paste0(output_prefix, "/mt_postfilter.png")
+png(mt_prefilter_name, width = 1200, height = 800)
+plot(MT_preFil)
+dev.off()
+
+# Save cell count prior to filtering
+cell_count <- purrr::imap_dfr(seurat_objs, ~ FetchData(.x, vars = "orig.ident") %>% 
+                                tally(name = "Cells_after_filtering") %>% 
+                                mutate(Sample = Project(seurat_objs[[.y]]), .before = `Cells_after_filtering`))
+
+write.csv(cell_count, paste0(output_prefix, "/cell_count_post_filtering.csv"), row.names = FALSE)
+```
+
+# Correlation plots between gene-level scnanoseq and CR dataset (post-filtering)
+
+Unlike with the raw data, here we only investigate pattern across common cells retained due to differences in the effect that MT filtering is causing due to higher MT genes detected in Oxfords vs Illumina.
+
+```{r}
+# merge metadata based on barcodes from scnanoseq and CR runs (gene-level only)
+
+merged_meta <- mapply(FUN = function(x,y) {
+  
+  scnano_meta <- x@meta.data
+  CR_meta <- y@meta.data
+  
+  # add BCs as column
+  scnano_meta$cell_barcodes <- rownames(scnano_meta)
+  CR_meta$cell_barcodes <- rownames(CR_meta)
+  
+  # 10X CR contains -1 (data imported by keeping them for now, but need to remove for this step)
+  
+  CR_meta$cell_barcodes <- gsub("-1","",CR_meta$cell_barcodes)
+  
+  # merge by keeping all barcodes (not just what is common b/t the two)
+  merged_meta <- merge(x = scnano_meta,
+                       y = CR_meta,
+                       by = "cell_barcodes",
+                       suffixes= c("_scnanoseq", "_ground_truth"))
+  
+  # Change NA to 0 to display any barcodes unique to each dataset
+  merged_meta <- merged_meta %>% mutate_if(is.numeric, ~replace_na(., 0))
+  
+}, x=seurat_objs[c(1,3)], y=seurat_objs[c(5,6)], SIMPLIFY = FALSE)
+```
+
+```{r}
+## nFeature scatters ##
+
+# params
+
+feature_1 <- "nFeature_RNA_scnanoseq"
+feature_2 <- "nFeature_RNA_ground_truth"
+output_feature <- "_nFeature_post_filter.png"
+
+mapply(FUN = function(x,y) {
+  
+  scatter_plot <- scatter_corr(data.frame = x,
+                               feature = feature_1,
+                               feature2 = feature_2,
+                               feature_type = "gene") # just genes here
+  
+  file_name <- paste0(output_prefix, "/", y, output_feature)
+
+  #adding some room to the right to avoid axis being cutoff
+  png(filename = file_name, height = 800, width = 1000)
+  plot(scatter_plot + theme(plot.margin = margin(t = 20, b = 20, l = 50, r = 50)))
+  dev.off()
+  
+}, x=merged_meta, y=names(merged_meta))
+
+## nCount scatters ##
+
+# params
+
+feature_1 <- "nCount_RNA_scnanoseq"
+feature_2 <- "nCount_RNA_ground_truth"
+output_feature <- "_nCount_post_filter.png"
+
+mapply(FUN = function(x,y) {
+  
+  scatter_plot <- scatter_corr(data.frame = x,
+                               feature = feature_1,
+                               feature2 = feature_2,
+                               feature_type = "gene")
+  
+  file_name <- paste0(output_prefix, "/", y, output_feature)
+
+  png(filename = file_name, height = 800, width = 1000)
+  plot(scatter_plot + theme(plot.margin = margin(t = 20, b = 20, l = 50, r = 50)))
+  dev.off()
+  
+}, x=merged_meta, y=names(merged_meta))
+```
+
+# `SCTransform` v2
+
+`SCTransform` v2 is applied for the normalization of RNA data 
+
+```{r}
+seurat_objs <- mapply(FUN = function(x) {
+  
+  seurat_obj <- SCTransform(x,
+                            assay = "RNA",
+                            vars.to.regress = "percent.mt",
+                            verbose = TRUE,
+                            vst.flavor = "v2",
+                            method = "glmGamPoi")
+  
+  return(seurat_obj)
+  
+}, x=seurat_objs)
+```
+
+Change to SCT assay:
+
+```{r}
+seurat_objs <- lapply(X = seurat_objs, FUN = function(x) {
+    
+    DefaultAssay(x) <- "SCT"
+    
+    return(x)
+    
+})
+```
+
+# Harmony integration (gene-level)
+
+For the gene-level datasets, we integrate the Oxford and Illumina data for 3' and 5' datasets, creating 2 integrated objects across technologies/datasets.
+
+```{r}
+# subset per sample object, to only datasets to be integrated (gene-level only)
+
+seurat_objs_3_prime <- seurat_objs[c("SC3pv3_gene", "SC3pv3_gene_illumina")]
+seurat_objs_5_prime <- seurat_objs[c("SC5pv2_gene", "SC5pv2_gene_illumina")]
+```
+
+```{r}
+# ref: https://github.com/satijalab/seurat/issues/4896
+
+### 3 prime integration ###
+
+int_features_3_prime <- SelectIntegrationFeatures(seurat_objs_3_prime, nfeatures = 3000)
+
+# merge datasets prior to harmony and add integration features
+seurat_objs_3_prime_int <- merge(x = seurat_objs_3_prime[[1]],
+                                 y = seurat_objs_3_prime[2:length(seurat_objs_3_prime)],
+                                 merge.data=TRUE)
+
+VariableFeatures(seurat_objs_3_prime_int) <- int_features_3_prime
+
+#PCA
+seurat_objs_3_prime_int <- RunPCA(seurat_objs_3_prime_int, npcs = 50)
+
+#orig.ident correspond to Illumina or Oxford sequencing
+seurat_objs_3_prime_int <- RunHarmony(seurat_objs_3_prime_int,
+                                      assay.use="SCT",
+                                      group.by.vars = "orig.ident")
+
+### 5 prime integration ###
+
+int_features_5_prime <- SelectIntegrationFeatures(seurat_objs_5_prime, nfeatures = 3000)
+
+# merge datasets prior to harmony and add integration features
+seurat_objs_5_prime_int <- merge(x = seurat_objs_5_prime[[1]],
+                                 y = seurat_objs_5_prime[2:length(seurat_objs_5_prime)],
+                                 merge.data=TRUE)
+
+VariableFeatures(seurat_objs_5_prime_int) <- int_features_5_prime
+
+#PCA
+seurat_objs_5_prime_int <- RunPCA(seurat_objs_5_prime_int, npcs = 50)
+
+#orig.ident correspond to Illumina or Oxford sequencing
+seurat_objs_5_prime_int <- RunHarmony(seurat_objs_5_prime_int,
+                                      assay.use="SCT",
+                                      group.by.vars = "orig.ident")
+```
+
+Save integrated objects:
+
+```{r}
+# creating a list of integrated objects:
+
+seurat_int <- list("SC3pv3_gene_int" = seurat_objs_3_prime_int,
+                   "SC5pv2_gene_int" = seurat_objs_5_prime_int)
+
+saveRDS(seurat_int, paste0(output_prefix,"/seurat_integrated_objs.rds"))
+```
+
+# Azimuth
+
+First slimming down the object as Azimuth performs normalization internally on RNA assay, run Azimuth and save metadata to be imported into objects
+
+```{r}
+# set `.libPaths` for azimuth reference to go into getwd instead of container's home dir
+.libPaths(getwd())
+
+# will create a separate obj for azimuth process and add meteadat to main object later on
+
+seurat_int_azimuth <- seurat_int
+
+# see available datasets
+available_data <- AvailableData()
+available_data[grep("Azimuth", available_data[, 3]), 1:3] #pbmcref fo 3' and lungref for 5'
+
+azimut_ref <- c("pbmcref", "lungref")
+
+seurat_int_azimuth <- mapply(FUN = function(x,y,z) {
+  
+  seurat_azimuth <- RunAzimuth(query = x,
+                               reference = y,
+                               assay = "RNA")
+
+
+}, x=seurat_int_azimuth, y=azimut_ref)
+
+# Plot prelim azimuth annotations on each level 
+# (reminder this is not on harmony UMAP as azimuth performs separate steps - we import metadata into ours):
+
+p1 <- DimPlot(seurat_int_azimuth$SC3pv3_gene_int, group.by = "predicted.celltype.l1", label = TRUE, label.size = 3)
+p2 <- DimPlot(seurat_int_azimuth$SC3pv3_gene_int, group.by = "predicted.celltype.l2", label = TRUE, label.size = 3)
+p3 <- DimPlot(seurat_int_azimuth$SC3pv3_gene_int, group.by = "predicted.celltype.l3",label = TRUE, label.size = 3)
+
+all_predicted <- cowplot::plot_grid(plotlist = list(p1,p2,p3))
+
+png(file=paste0(output_prefix, "/predicted_cell_types_azimuth_pbmc.png"), width = 1600, height = 1200)
+plot(all_predicted)
+dev.off()
+
+p1 <- DimPlot(seurat_int_azimuth$SC5pv2_gene_int, group.by = "predicted.ann_level_1", label = TRUE, label.size = 3)
+p2 <- DimPlot(seurat_int_azimuth$SC5pv2_gene_int, group.by = "predicted.ann_level_2", label = TRUE, label.size = 3)
+p3 <- DimPlot(seurat_int_azimuth$SC5pv2_gene_int, group.by = "predicted.ann_level_3",label = TRUE, label.size = 3)
+p4 <- DimPlot(seurat_int_azimuth$SC5pv2_gene_int, group.by = "predicted.ann_level_4",label = TRUE, label.size = 3)
+p5 <- DimPlot(seurat_int_azimuth$SC5pv2_gene_int, group.by = "predicted.ann_level_5",label = TRUE, label.size = 3)
+p6 <- DimPlot(seurat_int_azimuth$SC5pv2_gene_int, group.by = "predicted.ann_finest_level",label = TRUE, label.size = 3)
+
+all_predicted <- cowplot::plot_grid(plotlist = list(p1,p2,p3,p4,p5,p6))
+
+png(file=paste0(output_prefix, "/predicted_cell_types_azimuth_lung.png"), width = 2000, height = 1200)
+plot(all_predicted)
+dev.off()
+```
+
+Add Azimuth metadata to main integrated object and save azimuth
+
+```{r}
+# add metadata to main object
+seurat_int <- mapply(FUN = function(x, y) {
+  
+  # trim down metadata to variables desired to be added to main obj
+  
+  meta <- as.data.frame(y@meta.data)
+  
+  meta <- dplyr::select(meta, starts_with(c("predicted.", "mapping.")))
+  
+  seurat_obj <- AddMetaData(x, meta)
+  
+  return(seurat_obj)
+  
+}, x=seurat_int, y=seurat_int_azimuth)
+
+lapply(X = seurat_int, FUN = function(x) {
+    
+    head(x@meta.data)
+
+})
+
+# save
+
+saveRDS(seurat_int_azimuth, paste0(output_prefix,"/seurat_azimuth.rds"))
+```
+
+# DIMENSIONS AND RESOLUTIONS (gene-level)
+
+## ELBOW PLOT
+
+```{r}
+mapply(FUN = function(x, y) {
+  
+  elbow_plot <- paste0(output_prefix, "/", y , "_elbow.png")
+  
+  png(elbow_plot,
+      width = 480,
+      height = 480)
+  
+  plot(ElbowPlot(object = x,
+                 ndims = 50,
+                 reduction = "pca"))
+  
+  dev.off()
+  
+}, x = seurat_int, y = names(seurat_int))
+```
+
+## DIMS and RES (gene-level) 
+
+The loop below will cycle through a set of dimensions (based on elbow plot) and resolutions to aid in a sensible choice of dims and resolution for the integrated object. A temporary object is created for the following process
+
+```{r}
+dim_output_dir <- paste0(output_prefix,"/dims_res_explore/")
+
+dir.create(dim_output_dir, recursive = TRUE)
+
+seurat_obj_tmp <- seurat_int
+
+cluster_res <- seq(from = 0.1, to = 0.5, by = 0.1)
+
+#NOTE: for future validations, can focus on higher dims (move range up)
+dim <- seq(from = 15, to = 25, by = 1)
+
+res <- tidyr::expand_grid(cluster_res, dim)
+
+for (obj in names(seurat_obj_tmp) ) {
+  
+  out_path <- paste0(dim_output_dir, obj)
+  
+  dir.create(out_path, recursive = TRUE, showWarnings = FALSE)
+  
+  for (i in seq(nrow(res))) {
+    
+    seurat_obj_tmp[[obj]] <- RunUMAP(seurat_obj_tmp[[obj]],
+                                     reduction = "harmony", 
+                                     dims = 1:res[i,]$dim)
+    
+    seurat_obj_tmp[[obj]] <- FindNeighbors(seurat_obj_tmp[[obj]],
+                                           reduction = "harmony",
+                                           dims = 1:res[i,]$dim)
+    
+    seurat_obj_tmp[[obj]] <- FindClusters(seurat_obj_tmp[[obj]],
+                                          resolution = res[i,]$cluster_res)
+    
+    file_name <- paste0(out_path,"/",
+                        res[i,]$dim,
+                        "_res_",
+                        res[i,]$cluster_res,
+                        ".png")
+    
+    p1 <- DimPlot(seurat_obj_tmp[[obj]], label = TRUE) + 
+      ggtitle(paste0("Dim_res: ", obj, "_",res[i,]$dim, "_", res[i,]$cluster_res))
+    
+    # plot second/third level of azimuth predicted cell types
+    
+    if (obj == "SC3pv3_gene_int") {
+      cell_prediction <- "predicted.celltype.l2"
+    } else {
+      cell_prediction <- "predicted.ann_level_3"
+    }
+    
+    p2 <- DimPlot(seurat_obj_tmp[[obj]], group.by = cell_prediction, label = TRUE)
+    
+    dim_res_plot <- p1 + p2
+    
+    png(file_name,
+        width = 1200,
+        height = 800)
+    
+    plot(dim_res_plot)
+    
+    dev.off()
+    
+  }
+}
+
+rm(seurat_obj_tmp)
+gc()
+```
+
+## CLUSTREE (gene-level)
+
+For specific chosen dimension, generate clustree plot(s)
+
+```{r}
+dim <- 25
+
+tmp_seurat_clustree <- seurat_int
+
+clustree_res <- seq(from = 0, to = 0.7, by = 0.1)
+
+res <- tidyr::expand_grid(clustree_res, dim)
+
+for (obj in names(tmp_seurat_clustree) ) {
+  
+  out_path <- paste0(dim_output_dir, obj)
+  
+  for (i in seq(nrow(res))) {
+    tmp_seurat_clustree[[obj]] <- RunUMAP(tmp_seurat_clustree[[obj]], 
+                                          reduction = "harmony",
+                                          dims = 1:dim)
+    
+    tmp_seurat_clustree[[obj]] <- FindNeighbors(tmp_seurat_clustree[[obj]],
+                                                reduction = "harmony",
+                                                dims = 1:dim)
+    
+    tmp_seurat_clustree[[obj]] <- FindClusters(tmp_seurat_clustree[[obj]],
+                                               resolution = res[i,]$clustree_res)
+  }
+  
+  # for each object, generate clustree map
+  
+  clustree_plot <- clustree(tmp_seurat_clustree[[obj]])
+  
+  pdf(paste0(out_path, "/",
+             obj,"_", 
+             "clustree.dim_", dim, ".pdf"),
+      width = 8,
+      height = 12)
+  plot(clustree_plot)
+  dev.off()
+  
+}
+
+rm(tmp_seurat_clustree)
+gc()
+```
+
+## CLUSTER (gene-level)
+
+With appropriate dim and res, cluster the objects:
+
+```{r}
+final_dim <- 25
+final_res <- c(0.6, 0.5)
+
+seurat_int <- mapply(FUN = function(x,y) {
+  
+  seurat_obj <- RunUMAP(obj = x,
+                        reduction = "harmony",
+                        dims = 1:final_dim)
+  
+  seurat_obj <- FindNeighbors(obj = seurat_obj,
+                              reduction = "harmony",
+                              dims = 1:final_dim)
+  
+  seurat_obj <- FindClusters(obj = seurat_obj,
+                             resolution = y)
+  
+  return(seurat_obj)
+  
+}, x = seurat_int, y = final_res)
+```
+
+## POST-INTEGRATION PLOTS (gene-level)
+
+### UMAPS with predicted cell types
+```{r}
+all_UMAPS <- mapply(FUN = function(x, y) {
+  
+  p1 <- DimPlot(x,
+                reduction = "umap",
+                label = TRUE,
+                pt.size = 1) + 
+    guides(color = guide_legend(override.aes = list(size = 8), ncol=1)) +
+    theme(legend.text = element_text(size = 30)) +
+    ggtitle(paste0("Gene-level: ", y))
+  
+  if (y == "SC3pv3_gene_int") {
+    cell_prediction <- "predicted.celltype.l2"
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+  }
+  
+  p2 <- DimPlot(x,
+                group.by = cell_prediction,
+                reduction = "umap",
+                label = TRUE,
+                pt.size = 1) + 
+    guides(color = guide_legend(override.aes = list(size = 8), ncol=1)) +
+    theme(legend.text = element_text(size = 30))
+  
+  return(p1 + p2)
+  
+}, x = seurat_int, y = names(seurat_int))
+
+
+png(paste0(output_prefix, "/","All_UMAPS_pbmc.png"),
+    width = 2000,
+    height = 1200)
+
+plot(all_UMAPS$SC3pv3_gene_int)
+
+dev.off()
+
+png(paste0(output_prefix, "/","All_UMAPS_lung.png"),
+    width = 2000,
+    height = 1200)
+
+
+plot(all_UMAPS$SC5pv2_gene_int)
+
+dev.off()
+```
+
+### UMAPS split by technology/pipeline
+
+```{r}
+all_UMAPS <- mapply(FUN = function(x, y) {
+  
+  p1 <- DimPlot(x,
+                reduction = "umap",
+                split.by = "orig.ident",
+                label = TRUE,
+                pt.size = 1) + 
+    guides(color = guide_legend(override.aes = list(size = 8), ncol=1)) +
+    theme(legend.text = element_text(size = 30)) +
+    ggtitle(paste0("Gene-level: ", y))
+  
+  if (y == "SC3pv3_gene_int") {
+    cell_prediction <- "predicted.celltype.l2"
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+  }
+  
+  p2 <- DimPlot(x,
+                group.by = cell_prediction,
+                split.by = "orig.ident",
+                reduction = "umap",
+                label = TRUE,
+                pt.size = 1) + 
+    guides(color = guide_legend(override.aes = list(size = 8), ncol=1)) +
+    theme(legend.text = element_text(size = 30))
+  
+  return(p1 + p2)
+  
+}, x = seurat_int, y = names(seurat_int))
+
+
+png(paste0(output_prefix, "/All_UMAPS_pbmc_split.png"),
+    width = 2200,
+    height = 1200)
+
+plot(all_UMAPS$SC3pv3_gene_int)
+
+dev.off()
+
+png(paste0(output_prefix, "/All_UMAPS_lung_split.png"),
+    width = 2200,
+    height = 1200)
+
+
+plot(all_UMAPS$SC5pv2_gene_int)
+
+dev.off()
+```
+
+### Post-integration QCs (post cell labeling ; gene-level)
+
+```{r}
+dir.create(paste0(output_prefix, "/post_label_QCs"), recursive = TRUE)
+
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_gene_int") {
+    cell_prediction <- "predicted.celltype.l2"
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+  }
+  
+  p1 <- plotCounts(input_obj = x,
+                   metadata_variable = cell_prediction,
+                   group.by = "orig.ident") +
+    theme(axis.text = element_text(size = 30))
+  
+  p2 <- plotCountsProportions(input_obj = x,
+                              metadata_variable = cell_prediction,
+                              group.by = "orig.ident") + 
+    theme(axis.text.x = element_text(angle = 90, size = 30),
+          axis.text.y = element_text(size = 30))
+  
+  
+  all_plots <- cowplot::plot_grid(plotlist = list(p1, p2), ncol = 1,
+                                  labels = "AUTO")
+  
+  png(paste0(output_prefix, "/post_label_QCs/Cell_counts_proportions", y, ".png"),width=1400,height=1600)
+  plot(all_plots)
+  dev.off()
+  
+}, x = seurat_int, y = names(seurat_int))
+
+saveRDS(seurat_int, paste0(output_prefix,"/seurat_int_gene_level.rds"))
+```
+
+# DIMENSIONS AND RESOLUTIONS (transcript-level)
+
+## PCA AND ELBOW PLOT
+
+```{r}
+seurat_objs_transcript <- seurat_objs[c("SC3pv3_transcript", "SC5pv2_transcript")]
+
+# Add azimuth metadata and compute how many cells contain this metadata in transcript datasets
+
+# add metadata to main object
+seurat_objs_transcript <- mapply(FUN = function(x, y) {
+  
+  # trim down metadata to variables desired to be added to main obj
+  
+  meta <- as.data.frame(y@meta.data)
+  
+  meta <- dplyr::select(meta, starts_with(c("predicted.", "mapping.")))
+  
+  seurat_obj <- AddMetaData(x, meta)
+  
+  return(seurat_obj)
+  
+}, x=seurat_objs_transcript, y=seurat_int_azimuth)
+
+lapply(X = seurat_objs_transcript, FUN = function(x) {
+    
+    head(x@meta.data)
+
+})
+
+# choose one prediction and compute ratio of how many cells contain azimuth annotation:
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_transcript") {
+    cell_prediction <- "predicted.celltype.l2"
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+  }
+  
+  print(table(is.na(x@meta.data[[cell_prediction]])))
+  
+  print("Ratio of barcodes containing Azimith annotations is:") # FALSE mean it has metadata
+  
+  cell_with_meta <- as.data.frame(table(is.na(x@meta.data[[cell_prediction]])))$Freq[1]
+  
+  print((cell_with_meta / nrow(x@meta.data)) * 100)
+
+}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+```
+
+```{r}
+seurat_objs_transcript <- mapply(FUN = function(x) {
+  
+  seurat_obj <- RunPCA(x, npcs = 50)
+  
+  return(seurat_obj)
+  
+}, x=seurat_objs_transcript)
+
+
+mapply(FUN = function(x, y) {
+  
+  elbow_plot <- paste0(output_prefix, "/", y , "_elbow.png")
+  
+  png(elbow_plot,
+      width = 480,
+      height = 480)
+  
+  plot(ElbowPlot(object = x,
+                 ndims = 50,
+                 reduction = "pca"))
+  
+  dev.off()
+  
+}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+```
+
+## DIMS and RES (gene-level) 
+
+The loop below will cycle through a set of dimensions (based on elbow plot) and resolutions to aid in a sensible choice of dims and resolution for the integrated object. A temporary object is created for the following process
+
+```{r}
+dim_output_dir <- paste0(output_prefix,"/dims_res_explore/")
+
+dir.create(dim_output_dir, recursive = TRUE)
+
+seurat_obj_tmp <- seurat_objs_transcript
+
+cluster_res <- seq(from = 0.1, to = 0.6, by = 0.1)
+
+dim <- seq(from = 20, to = 27, by = 1)
+
+res <- tidyr::expand_grid(cluster_res, dim)
+
+for (obj in names(seurat_obj_tmp) ) {
+  
+  out_path <- paste0(dim_output_dir, obj)
+  
+  dir.create(out_path, recursive = TRUE, showWarnings = FALSE)
+  
+  for (i in seq(nrow(res))) {
+    
+    seurat_obj_tmp[[obj]] <- RunUMAP(seurat_obj_tmp[[obj]],
+                                     reduction = "pca", 
+                                     dims = 1:res[i,]$dim)
+    
+    seurat_obj_tmp[[obj]] <- FindNeighbors(seurat_obj_tmp[[obj]],
+                                           reduction = "pca",
+                                           dims = 1:res[i,]$dim)
+    
+    seurat_obj_tmp[[obj]] <- FindClusters(seurat_obj_tmp[[obj]],
+                                          resolution = res[i,]$cluster_res)
+    
+    file_name <- paste0(out_path,"/",
+                        res[i,]$dim,
+                        "_res_",
+                        res[i,]$cluster_res,
+                        ".png")
+    
+    p1 <- DimPlot(seurat_obj_tmp[[obj]], label = TRUE) + 
+      ggtitle(paste0("Dim_res: ", obj, "_",res[i,]$dim, "_", res[i,]$cluster_res))
+    
+    # plot second/third level of azimuth predicted cell types
+    
+    if (obj == "SC3pv3_transcript") {
+      cell_prediction <- "predicted.celltype.l2"
+    } else {
+      cell_prediction <- "predicted.ann_level_3"
+    }
+    
+    p2 <- DimPlot(seurat_obj_tmp[[obj]], group.by = cell_prediction, label = TRUE)
+    
+    dim_res_plot <- p1 + p2
+    
+    png(file_name,
+        width = 1200,
+        height = 800)
+    
+    plot(dim_res_plot)
+    
+    dev.off()
+    
+  }
+}
+
+rm(seurat_obj_tmp)
+gc()
+```
+
+
+## CLUSTREE (gene-level)
+
+For specific chosen dimension, generate clustree plot(s)
+
+```{r}
+dim <- 25
+
+tmp_seurat_clustree <- seurat_objs_transcript
+
+clustree_res <- seq(from = 0, to = 0.8, by = 0.1)
+
+res <- tidyr::expand_grid(clustree_res, dim)
+
+for (obj in names(tmp_seurat_clustree) ) {
+  
+  out_path <- paste0(dim_output_dir, obj)
+  
+  for (i in seq(nrow(res))) {
+    tmp_seurat_clustree[[obj]] <- RunUMAP(tmp_seurat_clustree[[obj]], 
+                                          reduction = "pca",
+                                          dims = 1:dim)
+    
+    tmp_seurat_clustree[[obj]] <- FindNeighbors(tmp_seurat_clustree[[obj]],
+                                                reduction = "pca",
+                                                dims = 1:dim)
+    
+    tmp_seurat_clustree[[obj]] <- FindClusters(tmp_seurat_clustree[[obj]],
+                                               resolution = res[i,]$clustree_res)
+  }
+  
+  # for each object, generate clustree map
+  
+  clustree_plot <- clustree(tmp_seurat_clustree[[obj]])
+  
+  pdf(paste0(out_path, "/",
+             obj,"_", 
+             "clustree.dim_", dim, ".pdf"),
+      width = 8,
+      height = 12)
+  plot(clustree_plot)
+  dev.off()
+  
+}
+
+rm(tmp_seurat_clustree)
+gc()
+```
+
+## CLUSTER (transcript-level)
+
+With appropriate dim and res, cluster the objects:
+
+```{r}
+final_dim <- 25
+final_res <- c(0.8, 0.6)
+
+seurat_objs_transcript <- mapply(FUN = function(x,y) {
+  
+  seurat_obj <- RunUMAP(obj = x,
+                        reduction = "pca",
+                        dims = 1:final_dim)
+  
+  seurat_obj <- FindNeighbors(obj = seurat_obj,
+                              reduction = "pca",
+                              dims = 1:final_dim)
+  
+  seurat_obj <- FindClusters(obj = seurat_obj,
+                             resolution = y)
+  
+  return(seurat_obj)
+  
+}, x = seurat_objs_transcript, y = final_res)
+```
+
+## POST-INTEGRATION PLOTS (transcript-level)
+
+### UMAPS with predicted cell types
+```{r}
+all_UMAPS <- mapply(FUN = function(x, y) {
+  
+  p1 <- DimPlot(x,
+                reduction = "umap",
+                label = TRUE,
+                pt.size = 1) + 
+    guides(color = guide_legend(override.aes = list(size = 8), ncol=1)) +
+    theme(legend.text = element_text(size = 30)) +
+    ggtitle(paste0("Transcript-level: ", y))
+  
+  if (y == "SC3pv3_transcript") {
+    cell_prediction <- "predicted.celltype.l2"
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+  }
+  
+  p2 <- DimPlot(x,
+                group.by = cell_prediction,
+                reduction = "umap",
+                label = TRUE,
+                pt.size = 1) + 
+    guides(color = guide_legend(override.aes = list(size = 8), ncol=1)) +
+    theme(legend.text = element_text(size = 30))
+  
+  return(p1 + p2)
+  
+}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+
+
+png(paste0(output_prefix, "/","All_UMAPS_pbmc_transcript.png"),
+    width = 2000,
+    height = 1200)
+
+plot(all_UMAPS$SC3pv3_transcript)
+
+dev.off()
+
+png(paste0(output_prefix, "/","All_UMAPS_lung_transcript.png"),
+    width = 2000,
+    height = 1200)
+
+
+plot(all_UMAPS$SC5pv2_transcript)
+
+dev.off()
+```
+
+
+```{r}
+saveRDS(seurat_objs_transcript, paste0(output_prefix,"/seurat_objs_transcript_level.rds"))
+```
+
+### Additional figures QCs (post cell labeling ; transcript-level)
+
+```{r}
+dir.create(paste0(output_prefix, "/post_label_QCs"), recursive = TRUE)
+
+# just counts, no proportion here
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_transcript") {
+    cell_prediction <- "predicted.celltype.l2"
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+  }
+  
+  p1 <- plotCounts(input_obj = x,
+                   metadata_variable = cell_prediction,
+                   group.by = "orig.ident") +
+    theme(axis.text = element_text(size = 30))
+
+  png(paste0(output_prefix, "/post_label_QCs/Cell_counts_proportions", y, ".png"),width=1400,height=800)
+  plot(p1)
+  dev.off()
+  
+}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+```
+
+#### Feature-level figures (gene and transcript)
+
+Prelim exploration of gene-level vs transcript-level expression for azimith markers
+
+```{r}
+dir.create(paste0(output_prefix, "/feature_expression"), recursive = TRUE)
+
+# import feature names associated with predicted cells types
+
+# PBMC FEATURES ###
+pbmc_features <- read.csv("./input/references/azimuth_pbmb_celltype_l2_features.csv")
+
+# combine all features for now
+pbmc_features <- unlist(strsplit(pbmc_features$Markers, ", "))
+
+pbmc_features <- unique(pbmc_features)
+
+# search for all transcript under a gene name
+
+pbmc_trascripts <- list()
+
+# Searches for transcript features within SCT counts
+pbmc_trascripts <- mapply(FUN = function(x) {
+  
+  feature <- grep(pattern = x,
+                  x = rownames(seurat_objs_transcript$SC3pv3_transcript@assays$SCT@counts),
+                  value = TRUE)
+  
+}, x = pbmc_features, SIMPLIFY = FALSE)
+
+pbmc_trascripts <- pbmc_trascripts[lengths(pbmc_trascripts) > 0]
+
+### LUNG FEATURES ###
+
+lung_features <- read.csv("./input/references/azimuth_lung_ann_level_3_features.csv")
+
+# combine all features for now
+lung_features <- unlist(strsplit(lung_features$Markers, ", "))
+
+lung_features <- unique(lung_features)
+
+# search for all transcript under a gene name
+
+lung_transcripts <- list()
+
+# Searches for transcript features within SCT counts
+lung_transcripts <- mapply(FUN = function(x) {
+  
+  feature <- grep(pattern = x,
+                  x = rownames(seurat_objs_transcript$SC5pv2_transcript@assays$SCT@counts),
+                  value = TRUE)
+  
+}, x = lung_features, SIMPLIFY = FALSE)
+
+lung_transcripts <- lung_transcripts[lengths(lung_transcripts) > 0]
+
+### gene ###
+
+mapply(FUN = function(x) {
+  
+  if (x %in% rownames(seurat_int$SC3pv3_gene_int@assays$SCT@counts)) {
+    
+    p1 <- FeaturePlot(object = seurat_int$SC3pv3_gene_int,
+                      cols = c("lightgrey", "#0072B2"),
+                      features = x, reduction = "umap")
+    
+    png(paste0(output_prefix, "/feature_expression/",x, "_pbmc_gene.png"),width=500,height=500)
+    plot(p1)
+    dev.off()
+    
+  } else {
+    
+    message(paste0(x, " not present in object. Skipping it."))
+    
+  }
+  
+}, x = pbmc_features)
+
+
+mapply(FUN = function(x) {
+  
+  if (x %in% rownames(seurat_int$SC5pv2_gene_int@assays$SCT@counts)) {
+    
+    p1 <- FeaturePlot(object = seurat_int$SC5pv2_gene_int,
+                      cols = c("lightgrey", "#0072B2"),
+                      features = x, reduction = "umap")
+    
+    png(paste0(output_prefix, "/feature_expression/",x, "_lung_gene.png"),width=500,height=500)
+    plot(p1)
+    dev.off()
+    
+  } else {
+    
+    message(paste0(x, " not present in object. Skipping it."))
+    
+  }
+  
+}, x = lung_features)
+
+### transcript ###
+
+mapply(FUN = function(x,y) {
+  
+  p1 <- FeaturePlot(object = seurat_objs_transcript$SC3pv3_transcript,
+                    cols = c("lightgrey", "#0072B2"),
+                    features = x, reduction = "umap",
+                    keep.scale = "all") # all for visualization across isoforms
+  
+  png(paste0(output_prefix, "/feature_expression/",y, "_pbmc_transcript.png"),width=1500,height=1200)
+  plot(p1)
+  dev.off()
+  
+}, x = pbmc_trascripts, y = names(pbmc_trascripts))
+
+mapply(FUN = function(x,y) {
+  
+  p1 <- FeaturePlot(object = seurat_objs_transcript$SC5pv2_transcript,
+                    cols = c("lightgrey", "#0072B2"),
+                    features = x, reduction = "umap",
+                    keep.scale = "all") # all for visualization across isoforms
+  
+  png(paste0(output_prefix, "/feature_expression/",y, "_lung_transcript.png"),width=1800,height=1200)
+  plot(p1)
+  dev.off()
+  
+}, x = lung_transcripts, y = names(lung_transcripts))
+```
+
