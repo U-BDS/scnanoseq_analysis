@@ -1502,6 +1502,7 @@ pbmc_features <- unique(pbmc_features)
 
 pbmc_trascripts <- list()
 
+#### TODO: make pattern more restrictive ("CD4" currently picks up other transcripts that have CD4 in name [e.g."CD46]) ####
 # Searches for transcript features within SCT counts
 pbmc_trascripts <- mapply(FUN = function(x) {
   
@@ -1544,10 +1545,12 @@ mapply(FUN = function(x) {
   if (x %in% rownames(seurat_int$SC3pv3_gene_int@assays$SCT@counts)) {
     
     p1 <- FeaturePlot(object = seurat_int$SC3pv3_gene_int,
+                      split.by = "orig.ident", # split by technology
                       cols = c("lightgrey", "#0072B2"),
-                      features = x, reduction = "umap")
+                      features = x, reduction = "umap",
+                      keep.scale = "all")
     
-    png(paste0(output_prefix, "/feature_expression/",x, "_pbmc_gene.png"),width=500,height=500)
+    png(paste0(output_prefix, "/feature_expression/",x, "_pbmc_gene.png"),width=700,height=500)
     plot(p1)
     dev.off()
     
@@ -1565,10 +1568,12 @@ mapply(FUN = function(x) {
   if (x %in% rownames(seurat_int$SC5pv2_gene_int@assays$SCT@counts)) {
     
     p1 <- FeaturePlot(object = seurat_int$SC5pv2_gene_int,
+                      split.by = "orig.ident", # split by technology
                       cols = c("lightgrey", "#0072B2"),
-                      features = x, reduction = "umap")
+                      features = x, reduction = "umap",
+                      keep.scale = "all")
     
-    png(paste0(output_prefix, "/feature_expression/",x, "_lung_gene.png"),width=500,height=500)
+    png(paste0(output_prefix, "/feature_expression/",x, "_lung_gene.png"),width=700,height=500)
     plot(p1)
     dev.off()
     
