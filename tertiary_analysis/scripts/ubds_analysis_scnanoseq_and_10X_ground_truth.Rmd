@@ -13,7 +13,7 @@ output:
 
 This script performs standard post-secondary analysis on the 10X data 5' and 3' datasets discussed at the following application note: <https://www.10xgenomics.com/library/dea066>. The input data is the scnanoseq outputs (gene and transcript level) of both datasets, along with the Illumina data provided by 10X (ground-truth).
 
-* Reference information: hg38 GENCODE XXXX (# TODO add details with reference matching Illumina run)
+* Reference information: hg38 GENCODE v32 (Ensembl 98). This version matches the genome reference used in the Illumina analysis by 10X.
 
 The input are the following files from the pipeline:
 
@@ -116,12 +116,12 @@ ah <- AnnotationHub()
 ```
 
 ```{r, eval=FALSE}
-hg38_q <- query(ah, c("Ensembl", "Homo sapiens","106")) ##TODO change to final version we settle (matching original Illumina run)
+hg38_q <- query(ah, c("Ensembl", "Homo sapiens","98"))
 hg38_q
 
 hg38_q$title # finding the same gtf we used for generating 10X reference
 
-hg38_annot <- subset(hg38_q, title == "Homo_sapiens.GRCh38.106.gtf")[[1]] ##TODO change to final version we settle
+hg38_annot <- subset(hg38_q, title == "Homo_sapiens.GRCh38.98.gtf")[[1]]
 hg38_annot #info matches the gtf we used in CR_arc
 
 # seqlevels are correct as we mapped to Ensembl genome
@@ -130,8 +130,7 @@ hg38_annot
 ```
 
 ```{r}
-#TODO: consider making a log file of Ensemlb and names matched for easy look-up back to ids if needed
-cell_bc_matrix_genes <- mapply(FUN = function(x,y) {
+cell_bc_matrix_genes <- mapply(FUN = function(x,y,n) {
   
   if (y == "gene") {
     
@@ -152,6 +151,12 @@ cell_bc_matrix_genes <- mapply(FUN = function(x,y) {
     stopifnot(identical(id_map$gene_id_version, rownames(x)))
     
     rownames(x) <- make.names(id_map$gene_name, unique = TRUE)
+    
+    #save id_map
+    
+    file_name <- paste0(output_prefix, "/", names(cell_bc_matrix[n]), "_id_map.csv")
+    
+    write.csv(id_map, file = file_name, row.names = FALSE)
     
   } else {
     
@@ -174,11 +179,17 @@ cell_bc_matrix_genes <- mapply(FUN = function(x,y) {
     
     rownames(x) <- make.names(id_map$transcript_name, unique = TRUE)
     
+    #save id_map
+    
+    file_name <- paste0(output_prefix, "/", names(cell_bc_matrix[n]), "_id_map.csv")
+    
+    write.csv(id_map, file = file_name, row.names = FALSE)
+    
   }
   
   return(x)
   
-}, x=cell_bc_matrix, y=feature_type_scnanoseq, SIMPLIFY = FALSE)
+}, x=cell_bc_matrix, y=feature_type_scnanoseq, n=1:length((cell_bc_matrix)),SIMPLIFY = FALSE)
 ```
 
 ```{r}
@@ -232,23 +243,102 @@ Combining all objects into a single list to easily iterate over all until object
 
 ```{r}
 seurat_objs <- c(seurat_objs_scnanoseq, seurat_objs_CR)
+
+feature_type_all <- c(feature_type_scnanoseq, feature_type_CR)
 ```
 
 
 # GENERATE QC'S
 
-```{r}
-# MITOCHONDRIAL PERCENT
+Mitochondrial % are computed based on feature biotype detected from Illumina data (given removal of other biotypes from the reference).
 
+```{r, eval=FALSE}
+# make vector of all gene names mapped to the mitochondrial chr.
+hg38_mito_genes <- as.data.frame(hg38_annot) %>%
+  filter(seqnames == "MT", type == "gene") %>%
+  select(seqnames, gene_id, gene_name, gene_biotype)
+
+hg38_mito_genes
+
+hg38_mito_transcripts <- as.data.frame(hg38_annot) %>%
+  filter(seqnames == "MT", type == "transcript") %>%
+  select(seqnames, transcript_id, transcript_name, gene_biotype)
+
+hg38_mito_transcripts
+```
+
+
+```{r, eval=FALSE}
+# parse which feature names are present on a per sample basis
 # feature names have been checked where general pattern usage below captures all biotypes
 # note that scnanoseq patterns have `.` instead of `-` due to Ensembl to gene name conversion
 
-seurat_objs <- lapply(X = seurat_objs, FUN = function(x) {
+hg38_mito_features <- mapply(FUN = function(x,y) {
   
-  RNA_MT <- PercentageFeatureSet(object = x, pattern = "^MT-", col.name = "percent.mt", assay = "RNA")
-  RNA_MT <- PercentageFeatureSet(object = x, pattern = "^MT.", col.name = "percent.mt", assay = "RNA")
+  if (y == "gene") {
+    
+    hg38_mito_genes$in_data <- hg38_mito_genes$gene_name %in% rownames(x@assays$RNA$counts)
+    
+    # try for MT pattern with `.`
+    if (all(hg38_mito_genes$in_data == FALSE)) {
+      
+      feauture_name <- gsub("-", ".", hg38_mito_genes$gene_name)
+      
+      hg38_mito_genes$gene_name <- feauture_name
+      
+      hg38_mito_genes$in_data <- feauture_name %in% rownames(x@assays$RNA$counts)
+      
+    }
+    
+    return(hg38_mito_genes)
+    
+  } else {
+    
+    hg38_mito_transcripts$in_data <- hg38_mito_transcripts$transcript_name %in% rownames(x@assays$RNA$counts)
+    
+    # try for MT pattern with `.`
+    if (all(hg38_mito_transcripts$in_data == FALSE)) {
+      
+      feauture_name <- gsub("-", ".", hg38_mito_transcripts$transcript_name)
+      
+      hg38_mito_transcripts$transcript_name <- feauture_name
+      
+      hg38_mito_transcripts$in_data <- feauture_name %in% rownames(x@assays$RNA$counts)
+      
+    }
+    
+    return(hg38_mito_transcripts)
+  }
   
-})
+}, x=seurat_objs, y=feature_type_all, SIMPLIFY = FALSE)
+
+hg38_mito_features
+
+# For any FALSE (genes not present in the dataset), filter out the genes
+# Also filter by biotype to keep only protein_coding to match Illumina quantification
+hg38_mito_features <- mapply(FUN = function(x,p) {
+  
+  sample_data_var <- paste0("in_data_", p)
+  
+  hg38_mito_features <- subset(x, in_data == TRUE & gene_biotype == "protein_coding")
+  
+  return(hg38_mito_features)
+  
+}, x=hg38_mito_features, p=names(hg38_mito_features), SIMPLIFY = FALSE)
+```
+
+Filter based on feature names detected above:
+
+```{r}
+# MITOCHONDRIAL PERCENT
+
+seurat_objs <- mapply(FUN = function(x,y) {
+
+  seurat_obj <- PercentageFeatureSet(object = x, features = y[,3], col.name = "percent.mt", assay = "RNA")
+  
+  return(seurat_obj)
+  
+}, x=seurat_objs, y=hg38_mito_features)
 
 # brief look at the metadata
 
@@ -400,11 +490,12 @@ cell_count <- purrr::imap_dfr(seurat_objs, ~ FetchData(.x, vars = "orig.ident") 
 write.csv(cell_count, paste0(output_prefix, "/cell_count_pre_filtering.csv"), row.names = FALSE)
 ```
 
+Initial QCs suggest that there are several low quality cells, however, the overall number of cells displaying this metric are similar across methods.
+
 # Correlation plots between gene-level scnanoseq and CR dataset (pre-filtering)
 
-We generate these prior to any filtering, since filtering based on cutoff are bound to vary on technological differences and other factors (e.g. see note below). Depending on this, the levels of filtration will vary (and downstream correlations will be limited to cells retained in both datasets. But here we show raw as well)
-
-NOTE: upon investigation of what genes are detected (using feature names, rather than pattern), oxford/scnanoseq samples contained a lot more MT genes than Illumina/CR (TODO: add a table showing this, as supplementary?). I also note, several cells here have high MT rates.
+We generate these prior to any filtering, since filtering based on cutoff are bound to vary on technological differences and other factors (e.g. see note below).
+Depending on this, the levels of filtration will vary (and downstream correlations will be limited to cells retained in both datasets. But here we show raw as well)
 
 ```{r}
 # merge metadata based on barcodes from scnanoseq and CR runs (gene-level only)
@@ -609,7 +700,7 @@ write.csv(cell_count, paste0(output_prefix, "/cell_count_post_filtering.csv"), r
 
 # Correlation plots between gene-level scnanoseq and CR dataset (post-filtering)
 
-Unlike with the raw data, here we only investigate pattern across common cells retained due to differences in the effect that MT filtering is causing due to higher MT genes detected in Oxfords vs Illumina.
+Unlike with the raw data, here we only investigate pattern across common cells retained due to differences in the effect that MT filtering is causing due to higher MT genes detected in Oxford vs Illumina.
 
 ```{r}
 # merge metadata based on barcodes from scnanoseq and CR runs (gene-level only)
@@ -785,7 +876,7 @@ saveRDS(seurat_int, paste0(output_prefix,"/seurat_integrated_objs.rds"))
 
 # Azimuth
 
-First slimming down the object as Azimuth performs normalization internally on RNA assay, run Azimuth and save metadata to be imported into objects
+First slimming down the object as Azimuth performs normalization internally on RNA assay, then run Azimuth and save metadata to be imported into objects
 
 ```{r}
 # set `.libPaths` for azimuth reference to go into getwd instead of container's home dir
@@ -1012,6 +1103,8 @@ gc()
 ## CLUSTER (gene-level)
 
 With appropriate dim and res, cluster the objects:
+Note: given scope of the analysis and use of azimuth based annotation, this choice can be an approximate
+to the azimith clusters. Further refinement can be performed for other types of downstream analysis.
 
 ```{r}
 final_dim <- 25
@@ -1502,11 +1595,10 @@ pbmc_features <- unique(pbmc_features)
 
 pbmc_trascripts <- list()
 
-#### TODO: make pattern more restrictive ("CD4" currently picks up other transcripts that have CD4 in name [e.g."CD46]) ####
 # Searches for transcript features within SCT counts
 pbmc_trascripts <- mapply(FUN = function(x) {
   
-  feature <- grep(pattern = x,
+  feature <- grep(pattern = paste0("^", x, "\\."),
                   x = rownames(seurat_objs_transcript$SC3pv3_transcript@assays$SCT@counts),
                   value = TRUE)
   
@@ -1530,7 +1622,7 @@ lung_transcripts <- list()
 # Searches for transcript features within SCT counts
 lung_transcripts <- mapply(FUN = function(x) {
   
-  feature <- grep(pattern = x,
+  feature <- grep(pattern = paste0("^", x, "\\."),
                   x = rownames(seurat_objs_transcript$SC5pv2_transcript@assays$SCT@counts),
                   value = TRUE)
   
