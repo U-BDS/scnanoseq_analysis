@@ -15,14 +15,15 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-This script performs standard post-secondary analysis on the BLAZE data which has been re-processed with our `nf-core/scnanoseq` pipeline. This dataset is compared to the published BLAZE data/matrices which we have analyzed in `ubds_analysis_BLAZE_data.Rmd`.
+This script performs standard post-secondary analysis on the BLAZE data which has been re-processed with `nf-core/scnanoseq` pipeline. 
+This dataset is compared to the published BLAZE data/matrices which we have analyzed in `ubds_analysis_BLAZE_data.Rmd`.
 
-* Reference information: hg38 GENCODE v40
+* Reference information: hg38 GENCODE v31 (matching genome version of original BLAZE analysis)
 
 The input are the following files from the pipeline:
 
 ```
-└── scnanoseq_data
+└── scnanoseq_blaze_data
     ├── ERR9958133.gene_counts.tsv
     ├── ERR9958133.transcript_counts.tsv
     ├── ERR9958134.gene_counts.tsv
@@ -53,15 +54,15 @@ lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/"
 output_prefix <- "./output_scnanoseq_data"
 
 # input files (sample and feature type [gene/transcript])
-in_files <- dir("./input/scnanoseq_data",full.names = TRUE)
+in_files <- dir("./input/scnanoseq_blaze_data",full.names = TRUE)
 in_files
 
 # sample names
-sample_names <- dir("./input/scnanoseq_data",full.names = FALSE)
+sample_names <- dir("./input/scnanoseq_blaze_data",full.names = FALSE)
 sample_names <- gsub("\\..*","",sample_names)
 
 # feature
-feature_type <- dir("./input/scnanoseq_data",full.names = FALSE)
+feature_type <- dir("./input/scnanoseq_blaze_data",full.names = FALSE)
 feature_type <- gsub("_.*","",feature_type)
 feature_type <- gsub(".*\\.","",feature_type)
 

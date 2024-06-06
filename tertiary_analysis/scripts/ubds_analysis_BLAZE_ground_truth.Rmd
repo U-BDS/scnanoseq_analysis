@@ -15,10 +15,12 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-This script performs standard post-secondary analysis on the BLAZE data which has been published. This dataset serves as ground-truth, and analyzed data will be compared to the `nf-core/scnanoseq` analysis of the raw BLAZE FASTQs as a critical validation step from the pipeline. The following should be noted regarding the pre-processing of the published BLAZE data:
+This script performs standard post-secondary analysis on the BLAZE data which has been published. This dataset serves as ground-truth,
+and analyzed data will be compared to the `nf-core/scnanoseq` analysis of the raw BLAZE FASTQs as a critical validation step from the pipeline. 
+The following should be noted regarding the pre-processing of the published BLAZE data:
 
 * Secondary analysis was performed with [FLAMES](https://github.com/mritchielab/FLAMES)
-* Reference information: hg38 GENCODE v31
+* Reference information: hg38 GENCODE v31 (Ensembl 97)
 * Data sources for matrices imported in this script: <https://melbourne.figshare.com/articles/dataset/Analysis_data_for_BLAZE/20335203>
 
 Please note the following metadata descriptions which are relevant to the processed data used in this analysis:
@@ -47,9 +49,11 @@ set.seed(1234)
 library(ggplot2)
 library(Seurat)
 library(dplyr)
+library(tidyr)
 library(grid)
 library(clustree)
 library(rtracklayer)
+library(AnnotationHub)
 
 # add custom functions from UBDS R scripts
 lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/", x)))
@@ -93,31 +97,23 @@ cell_bc_matrix <- lapply(setNames(in_files,
 
 # Create the seurat object using RNA Assay
 seurat_objs <- mapply(FUN = function(x,y) {
-  
+
   seurat_obj <- CreateSeuratObject(
     counts = x,
     assay = "RNA",
     min.cells = 1,
     min.features = 1,
     project = y)
-  
+
   return(seurat_obj)
-  
+
 }, x=cell_bc_matrix, y=names(cell_bc_matrix))
 ```
-
 
 # GENERATE QC'S
 
 ```{r}
 # MITOCHONDRIAL PERCENT
-
-# below can be used if we have gene names and transcript names (transcript names to be carefully checked for pattern)
-#seurat_objs <- lapply(X = seurat_objs, FUN = function(x) {
-  
-  #RNA_MT <- PercentageFeatureSet(object = x, pattern = "^MT-", col.name = "percent.mt", assay = "RNA")
-  
-#})
 
 #--- Fetch MT features ids ---
 # Since currently working with, IDs, they need to be brought in to quantify MT counts
@@ -180,7 +176,11 @@ lapply(X = ids_per_obj, FUN = function(x) {
 })
 ```
 
-Since there are no features detected which overlap with GENCODE's v31 mitochondrial IDs, mito % are not added in this analysis. This step is present in the scnonoseq version of the analysis.
+Since there are no features detected which overlap with GENCODE's v31 mitochondrial IDs, mito % are not added in this analysis.
+I note that this is likely due to a miss-match in the reported feature id in the input GTF vs what is reported in the manuscript,
+or perhaps differences linked to the upstream analysis methods from the BLAZE datasets.
+Given the scope of this analysis, this issue has minor impact to the overall validation.
+Further, this step is present in the scnonoseq version of the analysis.
 
 ```{r}
 # VIOLIN AND FEATURESCATTER, PRE-FILTER QC
@@ -436,29 +436,44 @@ cell_count <- purrr::imap_dfr(seurat_objs, ~ FetchData(.x, vars = "orig.ident") 
 write.csv(cell_count, paste0(output_prefix, "/cell_count_post_filtering.csv"), row.names = FALSE)
 ```
 
-# NORMALIZATION, VARIABLE FEATURES, SCALING, PCA
+# `SCTransform` v2
+
+`SCTransform` v2 is applied for the normalization of RNA data 
+
 ```{r}
 seurat_objs <- mapply(FUN = function(x) {
   
-  seurat_obj <- NormalizeData(x,
-                              assay = "RNA",
-                              scale.factor = 10000,
-                              normalization.method = "LogNormalize",
-                              verbose = TRUE)
-  
-  seurat_obj <- FindVariableFeatures(seurat_obj,
-                                     assay = "RNA",
-                                     selection.method = "vst",
-                                     nfeatures = 2000)
-  
-  # add percent.mt as variable to be regressed
-  seurat_obj <- ScaleData(seurat_obj)
-  
-  seurat_obj <- RunPCA(seurat_obj, npcs = 50) 
+  seurat_obj <- SCTransform(x,
+                            assay = "RNA",
+                            #vars.to.regress = "percent.mt",
+                            verbose = TRUE,
+                            vst.flavor = "v2",
+                            method = "glmGamPoi")
   
   return(seurat_obj)
   
-}, x = seurat_objs, SIMPLIFY = FALSE)
+}, x=seurat_objs)
+```
+
+Change to SCT assay and run PCA
+
+```{r}
+seurat_objs <- lapply(X = seurat_objs, FUN = function(x) {
+    
+    DefaultAssay(x) <- "SCT"
+    
+    return(x)
+    
+})
+
+seurat_objs <- mapply(FUN = function(x) {
+  
+  seurat_obj <- RunPCA(x, npcs = 50)
+  
+  return(seurat_obj)
+  
+}, x=seurat_objs)
+
 ```
 
 # ELBOW PLOT
@@ -494,7 +509,7 @@ seurat_obj_tmp <- seurat_objs
 
 cluster_res <- seq(from = 0, to = 1, by = 0.1)
 
-dim <- seq(from = 5, to = 15, by = 1)
+dim <- seq(from = 5, to = 7, by = 1)
 
 res <- tidyr::expand_grid(cluster_res, dim)
 
