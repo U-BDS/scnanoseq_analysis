@@ -51,7 +51,7 @@ lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/"
 #### CONSTANT DEFS ####
 
 ## The prefix to output files
-output_prefix <- "./output_scnanoseq_data"
+output_prefix <- "./output_BLAZE_scnanoseq_data"
 
 # input files (sample and feature type [gene/transcript])
 in_files <- dir("./input/scnanoseq_blaze_data",full.names = TRUE)
@@ -115,7 +115,7 @@ seurat_objs <- mapply(FUN = function(x,y) {
 # Since currently working with, IDs, they need to be brought in to quantify MT counts
 
 # import gtf
-hg38_gtf_gr <- rtracklayer::import("./input/references/gencode.v40.annotation.gtf")
+hg38_gtf_gr <- rtracklayer::import("./input/references/gencode.v31.annotation.gtf")
 
 # specify genome
 genome(hg38_gtf_gr) <- "GRCh38"
@@ -444,31 +444,44 @@ cell_count <- purrr::imap_dfr(seurat_objs, ~ FetchData(.x, vars = "orig.ident") 
 write.csv(cell_count, paste0(output_prefix, "/cell_count_post_filtering.csv"), row.names = FALSE)
 ```
 
-# NORMALIZATION, VARIABLE FEATURES, SCALING, PCA
+# `SCTransform` v2
+
+`SCTransform` v2 is applied for the normalization of RNA data 
+
 ```{r}
 seurat_objs <- mapply(FUN = function(x) {
   
-  seurat_obj <- NormalizeData(x,
-                              assay = "RNA",
-                              scale.factor = 10000,
-                              normalization.method = "LogNormalize",
-                              verbose = TRUE)
-  
-  seurat_obj <- FindVariableFeatures(seurat_obj,
-                                     assay = "RNA",
-                                     selection.method = "vst",
-                                     nfeatures = 2000)
-  
-  # add percent.mt as variable to be regressed
-  seurat_obj <- ScaleData(seurat_obj,
-                          vars.to.regress = "percent.mt")
-  
-  
-  seurat_obj <- RunPCA(seurat_obj, npcs = 50) 
+  seurat_obj <- SCTransform(x,
+                            assay = "RNA",
+                            vars.to.regress = "percent.mt",
+                            verbose = TRUE,
+                            vst.flavor = "v2",
+                            method = "glmGamPoi")
   
   return(seurat_obj)
   
-}, x = seurat_objs, SIMPLIFY = FALSE)
+}, x=seurat_objs)
+```
+
+Change to SCT assay and run PCA
+
+```{r}
+seurat_objs <- lapply(X = seurat_objs, FUN = function(x) {
+    
+    DefaultAssay(x) <- "SCT"
+    
+    return(x)
+    
+})
+
+seurat_objs <- mapply(FUN = function(x) {
+  
+  seurat_obj <- RunPCA(x, npcs = 50)
+  
+  return(seurat_obj)
+  
+}, x=seurat_objs)
+
 ```
 
 # ELBOW PLOT
@@ -504,7 +517,7 @@ seurat_obj_tmp <- seurat_objs
 
 cluster_res <- seq(from = 0, to = 1, by = 0.1)
 
-dim <- seq(from = 5, to = 15, by = 1)
+dim <- seq(from = 5, to = 7, by = 1)
 
 res <- tidyr::expand_grid(cluster_res, dim)
 
@@ -700,9 +713,14 @@ dev.off()
 
 # FindAllMarkers
 
+**Note**: pseudobulk analysis is a better approach to DEG testing, but this goes beyond the scope of this analysis
+(little weight is put into the findings of any DEG analysis in this dataset).
+
 ```{r}
 #### CELL MARKERS - FIND ALL MARKERS ####
 # FindAllMarkers to recapitulate original analysis
+# we note that pseudobulk analysis is a better approach to
+# DEG testing, but that this goes beyond the scope of the analysis we perform here
 
 mapply(FUN = function(x, y) {
   
@@ -735,8 +753,11 @@ mapply(FUN = function(x, y) {
 
 # BLAZE MARKERS
 
+"BLAZE" markers are the gene IDs from the Blaze "Marker gene" analysis. 
+Here we have mapped them to transcript IDs, gene names and transcript names as well.
+
 ```{r}
-markers <- read.table("input/references/blaze_gene_markers_gencode_v40_full.csv",
+markers <- read.table("input/references/blaze_gene_markers_gencode_v31_full.csv",
                       sep=",",
                       header = TRUE,
                       row.names = NULL)

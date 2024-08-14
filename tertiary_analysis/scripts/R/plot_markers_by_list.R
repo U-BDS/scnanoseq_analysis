@@ -19,7 +19,7 @@ plot_markers_by_list <- function(seurat_obj,
   # Feature Plot
   png(paste0(out_dir_lst, out_prefix_lst, "markers_featureplot.png"),
       width = 2000,
-      height = 1000)
+      height = 3000)
   
   plot(
     FeaturePlot(object = seurat_obj,
@@ -32,7 +32,7 @@ plot_markers_by_list <- function(seurat_obj,
   # Violin Plot
   png(paste0(out_dir_lst, out_prefix_lst, "markers_violinplot.png"),
       width = 2000,
-      height = 1000)
+      height = 3000)
   
   plot(
     VlnPlot(object = seurat_obj,
@@ -46,7 +46,7 @@ plot_markers_by_list <- function(seurat_obj,
   # Dot Plot
   png(paste0(out_dir_lst, out_prefix_lst, "markers_dotplot.png"),
       width = 2000,
-      height = 1000)
+      height = 3000)
   
   plot(
     DotPlot(object = seurat_obj,
