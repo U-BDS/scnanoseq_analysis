@@ -11,7 +11,8 @@ output:
     toc_float: true
 ---
 
-This script performs standard post-secondary analysis on the 10X data 5' and 3' datasets discussed at the following application note: <https://www.10xgenomics.com/library/dea066>. The input data is the scnanoseq outputs (gene and transcript level) of both datasets, along with the Illumina data provided by 10X (ground-truth).
+This script performs standard post-secondary analysis on the 10X data 5' and 3' datasets discussed at the following application note: <https://www.10xgenomics.com/library/dea066>. 
+The input data is the scnanoseq outputs (gene and transcript level) of both datasets, along with the Illumina data provided by 10X (ground-truth).
 
 * Reference information: hg38 GENCODE v32 (Ensembl 98). This version matches the genome reference used in the Illumina analysis by 10X.
 
@@ -189,8 +190,9 @@ cell_bc_matrix_genes <- mapply(FUN = function(x,y,n) {
   
   return(x)
   
-}, x=cell_bc_matrix, y=feature_type_scnanoseq, n=1:length((cell_bc_matrix)),SIMPLIFY = FALSE)
+}, x=cell_bc_matrix, y=feature_type_scnanoseq, n=1:length((cell_bc_matrix)), SIMPLIFY = FALSE)
 ```
+
 
 ```{r}
 rm(cell_bc_matrix)
@@ -583,10 +585,9 @@ mapply(FUN = function(x,y) {
 saveRDS(seurat_objs, paste0(output_prefix,"/all_10X_prefilter.rds"))
 ```
 
-
 ```{r}
-# filtering criteria b/t gene and transcript is != based on QC plot (we do not need to set a higher cutoff for transcript-level)
-nFeature_RNA_min <- c(400, 300, 400, 300, 400, 400)
+# filtering criteria b/t gene and transcript is != based on QC plot
+nFeature_RNA_min <- c(500, 800, 500, 800, 500, 500)
 
 # filter
 seurat_objs <- mapply(FUN = function(x, y) {
@@ -822,7 +823,7 @@ seurat_objs_5_prime <- seurat_objs[c("SC5pv2_gene", "SC5pv2_gene_illumina")]
 ```
 
 ```{r}
-# ref: https://github.com/satijalab/seurat/issues/4896
+# ref: https://github.com/satijalab/seurat/issues/4896 (SCTransform with Harmony)
 
 ### 3 prime integration ###
 
@@ -990,10 +991,10 @@ dir.create(dim_output_dir, recursive = TRUE)
 
 seurat_obj_tmp <- seurat_int
 
-cluster_res <- seq(from = 0.1, to = 0.5, by = 0.1)
+cluster_res <- seq(from = 0.1, to = 0.7, by = 0.1)
 
 #NOTE: for future validations, can focus on higher dims (move range up)
-dim <- seq(from = 15, to = 25, by = 1)
+dim <- seq(from = 25, to = 27, by = 1)
 
 res <- tidyr::expand_grid(cluster_res, dim)
 
@@ -1107,25 +1108,25 @@ Note: given scope of the analysis and use of azimuth based annotation, this choi
 to the azimith clusters. Further refinement can be performed for other types of downstream analysis.
 
 ```{r}
-final_dim <- 25
-final_res <- c(0.6, 0.5)
+final_dim <- c(25, 27)
+final_res <- c(0.7, 0.5)
 
-seurat_int <- mapply(FUN = function(x,y) {
+seurat_int <- mapply(FUN = function(x,y,z) {
   
   seurat_obj <- RunUMAP(obj = x,
                         reduction = "harmony",
-                        dims = 1:final_dim)
+                        dims = 1:y)
   
   seurat_obj <- FindNeighbors(obj = seurat_obj,
                               reduction = "harmony",
-                              dims = 1:final_dim)
+                              dims = 1:y)
   
   seurat_obj <- FindClusters(obj = seurat_obj,
-                             resolution = y)
+                             resolution = z)
   
   return(seurat_obj)
   
-}, x = seurat_int, y = final_res)
+}, x = seurat_int, y = final_dim, z = final_res)
 ```
 
 ## POST-INTEGRATION PLOTS (gene-level)
@@ -1259,7 +1260,7 @@ mapply(FUN = function(x, y) {
   all_plots <- cowplot::plot_grid(plotlist = list(p1, p2), ncol = 1,
                                   labels = "AUTO")
   
-  png(paste0(output_prefix, "/post_label_QCs/Cell_counts_proportions", y, ".png"),width=1400,height=1600)
+  png(paste0(output_prefix, "/post_label_QCs/Cell_counts_proportions_", y, ".png"),width=1400,height=1600)
   plot(all_plots)
   dev.off()
   
@@ -1299,7 +1300,7 @@ lapply(X = seurat_objs_transcript, FUN = function(x) {
 })
 
 # choose one prediction and compute ratio of how many cells contain azimuth annotation:
-mapply(FUN = function(x, y) {
+percent_ratio <- mapply(FUN = function(x, y) {
   
   if (y == "SC3pv3_transcript") {
     cell_prediction <- "predicted.celltype.l2"
@@ -1314,9 +1315,15 @@ mapply(FUN = function(x, y) {
   cell_with_meta <- as.data.frame(table(is.na(x@meta.data[[cell_prediction]])))$Freq[1]
   
   print((cell_with_meta / nrow(x@meta.data)) * 100)
-
+  
 }, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+
+# save ratio of BCs with Azimuth annotation
+write.csv(as.data.frame(percent_ratio), paste0(output_prefix,"/percent_barcodes_with_azimuth.csv"))
 ```
+
+NOTE: in the current analysis only one cell from the 3' dataset did not have an Azimuth annotation (99.97573% of cells were annotated).
+All cells from the 5' dataset contained an annotation that was transferred from gene to transcript (100%)
 
 ```{r}
 seurat_objs_transcript <- mapply(FUN = function(x) {
@@ -1356,9 +1363,9 @@ dir.create(dim_output_dir, recursive = TRUE)
 
 seurat_obj_tmp <- seurat_objs_transcript
 
-cluster_res <- seq(from = 0.1, to = 0.6, by = 0.1)
+cluster_res <- seq(from = 0.1, to = 0.9, by = 0.1)
 
-dim <- seq(from = 20, to = 27, by = 1)
+dim <- seq(from = 25, to = 27, by = 1)
 
 res <- tidyr::expand_grid(cluster_res, dim)
 
@@ -1418,7 +1425,7 @@ gc()
 ```
 
 
-## CLUSTREE (gene-level)
+## CLUSTREE (transcript-level)
 
 For specific chosen dimension, generate clustree plot(s)
 
@@ -1427,7 +1434,7 @@ dim <- 25
 
 tmp_seurat_clustree <- seurat_objs_transcript
 
-clustree_res <- seq(from = 0, to = 0.8, by = 0.1)
+clustree_res <- seq(from = 0, to = 0.9, by = 0.1)
 
 res <- tidyr::expand_grid(clustree_res, dim)
 
@@ -1567,7 +1574,7 @@ mapply(FUN = function(x, y) {
                    group.by = "orig.ident") +
     theme(axis.text = element_text(size = 30))
 
-  png(paste0(output_prefix, "/post_label_QCs/Cell_counts_proportions", y, ".png"),width=1400,height=800)
+  png(paste0(output_prefix, "/post_label_QCs/Cell_counts_", y, ".png"),width=1400,height=800)
   plot(p1)
   dev.off()
   
@@ -1590,6 +1597,13 @@ pbmc_features <- read.csv("./input/references/azimuth_pbmb_celltype_l2_features.
 pbmc_features <- unlist(strsplit(pbmc_features$Markers, ", "))
 
 pbmc_features <- unique(pbmc_features)
+
+# remove features with a "-"  for scope of the following figures:
+
+pbmc_features <- pbmc_features[!grepl("-", pbmc_features)]
+
+# Print the updated vector to verify
+print(pbmc_features)
 
 # search for all transcript under a gene name
 
@@ -1614,6 +1628,10 @@ lung_features <- read.csv("./input/references/azimuth_lung_ann_level_3_features.
 lung_features <- unlist(strsplit(lung_features$Markers, ", "))
 
 lung_features <- unique(lung_features)
+
+# remove features with a "-"  for scope of the following figures:
+
+lung_features <- lung_features[!grepl("-", lung_features)]
 
 # search for all transcript under a gene name
 
