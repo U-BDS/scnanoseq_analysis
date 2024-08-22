@@ -1310,7 +1310,7 @@ percent_ratio <- mapply(FUN = function(x, y) {
   
   print(table(is.na(x@meta.data[[cell_prediction]])))
   
-  print("Ratio of barcodes containing Azimith annotations is:") # FALSE mean it has metadata
+  print("Ratio of barcodes containing Azimith annotations is:") # FALSE means it has metadata
   
   cell_with_meta <- as.data.frame(table(is.na(x@meta.data[[cell_prediction]])))$Freq[1]
   
@@ -1322,8 +1322,7 @@ percent_ratio <- mapply(FUN = function(x, y) {
 write.csv(as.data.frame(percent_ratio), paste0(output_prefix,"/percent_barcodes_with_azimuth.csv"))
 ```
 
-NOTE: in the current analysis only one cell from the 3' dataset did not have an Azimuth annotation (99.97573% of cells were annotated).
-All cells from the 5' dataset contained an annotation that was transferred from gene to transcript (100%)
+NOTE: In the current analysis. all cells from the 3' and 5' datasets contained an annotation that was transferred from gene to transcript (100%)
 
 ```{r}
 seurat_objs_transcript <- mapply(FUN = function(x) {
@@ -1591,7 +1590,7 @@ dir.create(paste0(output_prefix, "/feature_expression"), recursive = TRUE)
 # import feature names associated with predicted cells types
 
 # PBMC FEATURES ###
-pbmc_features <- read.csv("./input/references/azimuth_pbmb_celltype_l2_features.csv")
+pbmc_features <- read.csv("./input/references/azimuth_pbmc_celltype_l2_features.csv")
 
 # combine all features for now
 pbmc_features <- unlist(strsplit(pbmc_features$Markers, ", "))
@@ -1724,3 +1723,12 @@ mapply(FUN = function(x,y) {
 }, x = lung_transcripts, y = names(lung_transcripts))
 ```
 
+```{r}
+# MD5 of all rds files
+rds_files <- list.files(path = output_prefix, pattern = "\\.rds$", full.names = TRUE)
+
+for (rds_file in rds_files) {
+  md5 <- paste0("md5sum ", rds_file, " >> ", output_prefix, "/md5sum.txt")
+  system(md5)
+}
+```
