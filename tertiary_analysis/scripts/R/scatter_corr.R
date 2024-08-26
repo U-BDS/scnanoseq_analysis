@@ -13,7 +13,8 @@
 #' @examples
 scatter_corr <- function(data.frame, feature, feature2,
                          feature_type = c("gene", "transcript"),
-                         axis_size = 20, title_size = 24) {
+                         axis_size = 20, title_size = 24,
+                         point_size = 3, point_alpha = 0.7) {
   
   # set visuals based on feature_type
   if (feature_type == "gene") {
@@ -28,7 +29,7 @@ scatter_corr <- function(data.frame, feature, feature2,
   scatter_plot <- ggplot(data.frame,
                          aes(x=.data[[feature]],
                              y=.data[[feature2]])) +
-    geom_point(size = 3, alpha = 0.7, stroke = 1, colour = color) +
+    geom_point(size = point_size, alpha = point_alpha, stroke = 1, colour = color) +
     stat_smooth(method = lm, colour = "#383434") +
     theme(axis.text.x = element_text(size=axis_size),
           axis.text.y = element_text(size=axis_size),

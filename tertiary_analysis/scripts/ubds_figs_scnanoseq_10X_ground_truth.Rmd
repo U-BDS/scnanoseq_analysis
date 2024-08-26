@@ -1,0 +1,196 @@
+---
+title: "scnanoseq - 10X 3' and 5': Figures for manuscript"
+author:
+  - name: "Austyn Trull"
+  - name: "Lara Ianov, Ph.D."
+output:
+  html_document:
+    code_folding: hide
+    css: "style.css"
+    toc: true
+    toc_float: true
+---
+
+Task: final figures for the manuscript (previous figs were for initial analysis. In this script, a subset is refined).
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+set.seed(1234)
+
+library(ggplot2)
+library(Seurat)
+library(dplyr)
+library(grid)
+library(tidyr)
+
+# add custom functions from UBDS R scripts
+lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/", x)))
+
+#### CONSTANT DEFS ####
+
+## The prefix to output files
+output_prefix <- "./output_10X_3_5_prime_dataset_figs"
+
+dir.create(file.path(output_prefix), recursive = TRUE)
+```
+
+# Load pre-processed Seurat objects
+
+```{r}
+seurat_int <- readRDS(file = "./output_scnanoseq_10X_data/seurat_int_gene_level.rds")
+seurat_objs_transcript <- readRDS(file = "./output_scnanoseq_10X_data/seurat_objs_transcript_level.rds")
+
+# Add sample metadata to integrated object which is more user-friendly for readers
+
+seurat_int$SC3pv3_gene_int$sample_info <- ifelse(seurat_int$SC3pv3_gene_int@meta.data$orig.ident == "SC3pv3_gene", yes = "scnanoseq_Oxford", no = "CR_Illumina")
+seurat_int$SC5pv2_gene_int$sample_info <- ifelse(seurat_int$SC5pv2_gene_int@meta.data$orig.ident == "SC5pv2_gene", yes = "scnanoseq_Oxford", no = "CR_Illumina")
+```
+
+# UMAPs (Gene-level)
+
+```{r}
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_gene_int") {
+    cell_prediction <- "predicted.celltype.l2"
+    title <- paste0("Gene-level 3' PBMC")
+    out_file <- paste0(output_prefix, "/UMAP_gene_level_PBMC.pdf")
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+    title <- paste0("Gene-level 5' lung cancer DTCs")
+    out_file <- paste0(output_prefix, "/UMAP_gene_level_lung.pdf")
+  }
+  
+  p1 <- DimPlot(x,
+                group.by = cell_prediction,
+                split.by = "sample_info",
+                reduction = "umap",
+                label = TRUE,
+                pt.size = NULL,
+                label.size = 4,
+                repel = TRUE) + NoLegend() +
+    guides(color = guide_legend(override.aes = list(size = 4), ncol=1)) +
+    ggtitle(title) +
+    theme(legend.text = element_text(size = 10), axis.title = element_text(size = 20),
+          plot.title = element_text(size = 30, color = "#0072B2"),
+          strip.text.x = element_text(size = 20, face = "bold"))
+  #save
+  
+  pdf(out_file, height = 8, width = 8)
+  plot(p1)
+  dev.off()
+  
+}, x = seurat_int, y = names(seurat_int))
+```
+
+# UMAPs (Transcript-level)
+
+```{r}
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_transcript") {
+    cell_prediction <- "predicted.celltype.l2"
+    title <- paste0("Transcript-level 3' PBMC")
+    out_file <- paste0(output_prefix, "/UMAP_transcript_level_PBMC.pdf")
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+    title <- paste0("Transcript-level 5' lung cancer DTCs")
+    out_file <- paste0(output_prefix, "/UMAP_transcript_level_lung.pdf")
+  }
+  
+  p1 <- DimPlot(x,
+                group.by = cell_prediction,
+                #split.by = "sample_info",
+                reduction = "umap",
+                label = TRUE,
+                pt.size = NULL,
+                label.size = 4,
+                repel = TRUE) + NoLegend() +
+    guides(color = guide_legend(override.aes = list(size = 4), ncol=1)) +
+    ggtitle(title, subtitle = "scnanoseq_Oxford") + 
+    theme(legend.text = element_text(size = 10), axis.title = element_text(size = 20),
+          plot.title = element_text(size = 30, color = "#009E73"),
+          plot.subtitle = element_text(size = 20, face = "bold", hjust = 0.5))
+  #save
+  
+  pdf(out_file, height = 8, width = 8)
+  plot(p1)
+  dev.off()
+  
+}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+```
+
+# nFeature Correlation plot (Gene-level, pre-filtering)
+
+Same plot generated during the analysis, with minor cosmetic changes below for paper:
+
+```{r}
+# import data (pre-filtering)
+
+pre_filter_objs <- readRDS("./output_scnanoseq_10X_data/all_10X_prefilter.rds")
+```
+
+```{r}
+# merge metadata based on barcodes from scnanoseq and CR runs (gene-level only)
+
+merged_meta <- mapply(FUN = function(x,y) {
+  
+  scnano_meta <- x@meta.data
+  CR_meta <- y@meta.data
+  
+  # add BCs as column
+  scnano_meta$cell_barcodes <- rownames(scnano_meta)
+  CR_meta$cell_barcodes <- rownames(CR_meta)
+  
+  # 10X CR contains -1 (data imported by keeping them for now, but need to remove for this step)
+  
+  CR_meta$cell_barcodes <- gsub("-1","",CR_meta$cell_barcodes)
+  
+  # merge by keeping all barcodes (not just what is common b/t the two)
+  merged_meta <- merge(x = scnano_meta,
+                       y = CR_meta,
+                       by = "cell_barcodes",
+                       suffixes= c("_scnanoseq", "_ground_truth"),
+                       all = TRUE)
+  
+  # Change NA to 0 to display any barcodes unique to each dataset
+  merged_meta <- merged_meta %>% mutate_if(is.numeric, ~replace_na(., 0))
+  
+}, x=pre_filter_objs[c(1,3)], y=pre_filter_objs[c(5,6)], SIMPLIFY = FALSE)
+```
+
+```{r}
+## nFeature scatters ##
+
+# params
+
+feature_1 <- "nFeature_RNA_scnanoseq"
+feature_2 <- "nFeature_RNA_ground_truth"
+output_feature <- "_nFeature_pre_filter.pdf"
+
+mapply(FUN = function(x,y) {
+  
+  scatter_plot <- scatter_corr(data.frame = x,
+                               feature = feature_1,
+                               feature2 = feature_2,
+                               feature_type = "gene",
+                               point_size = 2,
+                               point_alpha = 0.5)
+  
+  # make axis titles cleaner:
+  
+  scatter_plot <- scatter_plot + xlab("nFeature scnanoseq_Oxford") + ylab("nFeature CR_Illumina")
+  
+  file_name <- paste0(output_prefix, "/", y, output_feature)
+
+  #adding some room to the right to avoid axis being cutoff
+  pdf(file = file_name, height = 8, width = 10)
+  plot(scatter_plot + theme(plot.margin = margin(t = 20, b = 20, l = 50, r = 50)))
+  dev.off()
+  
+}, x=merged_meta, y=names(merged_meta))
+```
+
