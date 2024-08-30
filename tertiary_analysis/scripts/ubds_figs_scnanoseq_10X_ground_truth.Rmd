@@ -319,14 +319,12 @@ mapply(FUN = function(x, y) {
   if (y == "SC3pv3_transcript") {
     cell_prediction <- "predicted.celltype.l2"
     title <- paste0("Transcript-level 3' PBMC")
-    #out_file <- paste0(output_prefix, "/Violins_transcript_level_PBMC.pdf")
     out_file <- paste0(output_prefix, "/DotPlot_transcript_level_PBMC.pdf")
     marker_input <- pbmc_trascripts
     width_out <- 14
   } else {
     cell_prediction <- "predicted.ann_level_3"
     title <- paste0("Transcript-level 5' lung cancer DTCs")
-    #out_file <- paste0(output_prefix, "/Violins_transcript_level_lung.pdf")
     out_file <- paste0(output_prefix, "/DotPlot_transcript_level_lung.pdf")
     marker_input <- lung_transcripts
     width_out <- 10
