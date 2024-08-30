@@ -43,6 +43,26 @@ dir.create(file.path(output_prefix), recursive = TRUE)
 seurat_int <- readRDS(file = "./output_scnanoseq_10X_data/seurat_int_gene_level.rds")
 seurat_objs_transcript <- readRDS(file = "./output_scnanoseq_10X_data/seurat_objs_transcript_level.rds")
 
+# Set default Idents
+
+cell_idents <- c("predicted.celltype.l2", "predicted.ann_level_3")
+
+seurat_int <- mapply(FUN = function(x,y) {
+
+  Idents(x) <- y
+  
+  return(x)
+  
+}, x=seurat_int, y=cell_idents)
+
+seurat_objs_transcript <- mapply(FUN = function(x,y) {
+
+  Idents(x) <- y
+  
+  return(x)
+  
+}, x=seurat_objs_transcript, y=cell_idents)
+
 # Add sample metadata to integrated object which is more user-friendly for readers
 
 seurat_int$SC3pv3_gene_int$sample_info <- ifelse(seurat_int$SC3pv3_gene_int@meta.data$orig.ident == "SC3pv3_gene", yes = "scnanoseq_Oxford", no = "CR_Illumina")
@@ -74,7 +94,9 @@ mapply(FUN = function(x, y) {
                 repel = TRUE) + NoLegend() +
     guides(color = guide_legend(override.aes = list(size = 4), ncol=1)) +
     ggtitle(title) +
-    theme(legend.text = element_text(size = 10), axis.title = element_text(size = 20),
+    theme(axis.title = element_text(size = 20),
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15),
           plot.title = element_text(size = 30, color = "#0072B2"),
           strip.text.x = element_text(size = 20, face = "bold"))
   #save
@@ -111,7 +133,9 @@ mapply(FUN = function(x, y) {
                 repel = TRUE) + NoLegend() +
     guides(color = guide_legend(override.aes = list(size = 4), ncol=1)) +
     ggtitle(title, subtitle = "scnanoseq_Oxford") + 
-    theme(legend.text = element_text(size = 10), axis.title = element_text(size = 20),
+    theme(axis.title = element_text(size = 20),
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15),
           plot.title = element_text(size = 30, color = "#009E73"),
           plot.subtitle = element_text(size = 20, face = "bold", hjust = 0.5))
   #save
@@ -177,8 +201,11 @@ mapply(FUN = function(x,y) {
                                feature = feature_1,
                                feature2 = feature_2,
                                feature_type = "gene",
+                               title_size = 30,
+                               axis_size = 15,
                                point_size = 2,
-                               point_alpha = 0.5)
+                               point_alpha = 0.5) + 
+    theme(axis.title = element_text(size = 20))
   
   # make axis titles cleaner:
   
@@ -187,10 +214,221 @@ mapply(FUN = function(x,y) {
   file_name <- paste0(output_prefix, "/", y, output_feature)
 
   #adding some room to the right to avoid axis being cutoff
-  pdf(file = file_name, height = 8, width = 10)
+  pdf(file = file_name, height = 8, width = 8)
   plot(scatter_plot + theme(plot.margin = margin(t = 20, b = 20, l = 50, r = 50)))
   dev.off()
   
 }, x=merged_meta, y=names(merged_meta))
 ```
 
+# Marker genes (Gene-level)
+
+```{r}
+marker_pbmc <- read.csv("./input/references/markers_subset_pbmc.csv")
+marker_lung <- read.csv("./input/references/markers_subset_lung.csv")
+```
+
+```{r}
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_gene_int") {
+    cell_prediction <- "predicted.celltype.l2"
+    title <- paste0("Gene-level 3' PBMC")
+    out_file <- paste0(output_prefix, "/Violins_gene_level_PBMC.pdf")
+    marker_input <- marker_pbmc$markers
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+    title <- paste0("Gene-level 5' lung cancer DTCs")
+    out_file <- paste0(output_prefix, "/Violins_gene_level_lung.pdf")
+    marker_input <- marker_lung$markers
+  }
+  
+  p1 <- VlnPlot(object = x,
+                split.by = "sample_info",
+                group.by = cell_prediction,
+                features = marker_input,
+                assay = "SCT",
+                stack = TRUE,
+                flip = TRUE) + 
+    ggtitle(title) +
+    theme(legend.position="bottom",
+          legend.text = element_text(size = 15),
+          axis.title = element_text(size = 20),
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15))
+  
+  #save
+  
+  pdf(out_file, height = 10, width = 10)
+  plot(p1)
+  dev.off()
+  
+}, x = seurat_int, y = names(seurat_int))
+```
+
+# Marker genes (Transcript-level)
+
+```{r}
+# search for all transcript under a gene name
+
+pbmc_trascripts <- list()
+
+# Searches for transcript features within SCT counts
+pbmc_trascripts <- mapply(FUN = function(x) {
+  
+  feature <- grep(pattern = paste0("^", x, "\\."),
+                  x = rownames(seurat_objs_transcript$SC3pv3_transcript@assays$SCT@counts),
+                  value = TRUE)
+  
+}, x = marker_pbmc$markers, SIMPLIFY = FALSE)
+
+pbmc_trascripts <- pbmc_trascripts[lengths(pbmc_trascripts) > 0]
+
+pbmc_trascripts <- as.character(unlist(pbmc_trascripts))
+
+# search for all transcript under a gene name
+
+lung_transcripts <- list()
+
+# Searches for transcript features within SCT counts
+lung_transcripts <- mapply(FUN = function(x) {
+  
+  feature <- grep(pattern = paste0("^", x, "\\."),
+                  x = rownames(seurat_objs_transcript$SC5pv2_transcript@assays$SCT@counts),
+                  value = TRUE)
+  
+}, x = marker_lung$markers, SIMPLIFY = FALSE)
+
+lung_transcripts <- lung_transcripts[lengths(lung_transcripts) > 0]
+
+lung_transcripts <- as.character(unlist(lung_transcripts))
+
+## remove any transcripts where sum == 0
+pbmc_trascripts <- pbmc_trascripts[sapply(pbmc_trascripts, function(transcript) {
+  sum(GetAssayData(seurat_objs_transcript$SC3pv3_transcript, layer = "data")[transcript, ]) > 0
+})]
+
+lung_transcripts <- lung_transcripts[sapply(lung_transcripts, function(transcript) {
+  sum(GetAssayData(seurat_objs_transcript$SC5pv2_transcript, layer = "data")[transcript, ]) > 0
+})]
+```
+
+```{r}
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_transcript") {
+    cell_prediction <- "predicted.celltype.l2"
+    title <- paste0("Transcript-level 3' PBMC")
+    #out_file <- paste0(output_prefix, "/Violins_transcript_level_PBMC.pdf")
+    out_file <- paste0(output_prefix, "/DotPlot_transcript_level_PBMC.pdf")
+    marker_input <- pbmc_trascripts
+    width_out <- 14
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+    title <- paste0("Transcript-level 5' lung cancer DTCs")
+    #out_file <- paste0(output_prefix, "/Violins_transcript_level_lung.pdf")
+    out_file <- paste0(output_prefix, "/DotPlot_transcript_level_lung.pdf")
+    marker_input <- lung_transcripts
+    width_out <- 10
+  }
+  
+  p1 <- DotPlot(object = x,
+                group.by = cell_prediction,
+                features = rev(marker_input),
+                assay = "SCT",
+                cols = c("#CC79A7","#009E73")) + 
+    coord_flip() +
+    ggtitle(title) +
+    theme(axis.title = element_text(size = 20),
+          axis.text.x = element_text(size=15, angle = 45, hjust=1),
+          axis.text.y = element_text(size=15))
+  
+  #save
+  
+  pdf(out_file, height = 16, width = width_out)
+  plot(p1)
+  dev.off()
+  
+}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+```
+
+# Gene/Transcript specific FeaturePlots
+
+
+```{r}
+genes_subset_pbmc <- c("CD8A", "CD79A")
+genes_subset_lung <- c("C1QB", "CD3E")
+
+# note for pbmc rev order to print featureplot with most transcript on top
+trascripts_subset_pbmc <- pbmc_trascripts[grep(paste(genes_subset_pbmc, collapse = "|"), pbmc_trascripts)]
+trascripts_subset_lung <- lung_transcripts[grep(paste(genes_subset_lung, collapse = "|"), lung_transcripts)]
+
+# order based on subset input
+trascripts_subset_pbmc <- trascripts_subset_pbmc[order(match(sub("\\..*$", "", trascripts_subset_pbmc),
+                                                             genes_subset_pbmc))]
+
+trascripts_subset_lung <- trascripts_subset_lung[order(match(sub("\\..*$", "", trascripts_subset_lung),
+                                                             genes_subset_lung))]
+
+# FeaturePlot (gene)
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_gene_int") {
+    cell_prediction <- "predicted.celltype.l2"
+    out_file <- paste0(output_prefix, "/Featureplot_gene_level_PBMC.pdf")
+    marker_input <- genes_subset_pbmc
+    
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+    out_file <- paste0(output_prefix, "/Featureplot_gene_level_lung.pdf")
+    marker_input <- genes_subset_lung
+  }
+  
+  # subset by scnanoseq only
+  tmp_obj <- x
+  Idents(tmp_obj) <- "sample_info"
+  tmp_obj <- subset(tmp_obj, idents = "scnanoseq_Oxford")
+  
+  p1 <- FeaturePlot(object = tmp_obj,
+                    features = marker_input,
+                    cols = c("#D3D3D3", "#0072B2"),
+                    ncol = 1)
+  
+  #save
+  
+  pdf(out_file, height = 12, width = 5)
+  plot(p1)
+  dev.off()
+  
+}, x = seurat_int, y = names(seurat_int))
+
+# FeaturePlot (transcript)
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_transcript") {
+    cell_prediction <- "predicted.celltype.l2"
+    out_file <- paste0(output_prefix, "/Featureplot_transcript_level_PBMC.pdf")
+    marker_input <- trascripts_subset_pbmc
+    n = 3
+    width_out <- 15
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+    out_file <- paste0(output_prefix, "/Featureplot_transcript_level_lung.pdf")
+    marker_input <- trascripts_subset_lung
+    n = 4
+    width_out <- 20
+  }
+  
+  p1 <- FeaturePlot(object = x,
+                    features = marker_input,
+                    cols = c("#D3D3D3", "#009E73"),
+                    ncol = n)
+  
+  #save
+  
+  pdf(out_file, height = 12, width = width_out)
+  plot(p1)
+  dev.off()
+  
+}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+```
