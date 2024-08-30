@@ -1266,6 +1266,17 @@ mapply(FUN = function(x, y) {
   
 }, x = seurat_int, y = names(seurat_int))
 
+
+# PrepSCT Markers for integrated object:
+
+seurat_int <- mapply(FUN = function(x,y) {
+
+  seurat_obj <- PrepSCTFindMarkers(x, assay = "SCT")
+  
+  return(seurat_obj)
+  
+}, x=seurat_int)
+
 saveRDS(seurat_int, paste0(output_prefix,"/seurat_int_gene_level.rds"))
 ```
 

@@ -705,47 +705,6 @@ gridExtra::grid.arrange(grobs = all_UMAPS_Count)
 dev.off()
 ```
 
-# FindAllMarkers
-
-**Note**: pseudobulk analysis is a better approach to DEG testing, but this goes beyond the scope of this analysis
-(little weight is put into the findings of any DEG analysis in this dataset).
-
-```{r}
-#### CELL MARKERS - FIND ALL MARKERS ####
-# FindAllMarkers to recapitulate original analysis
-# we note that pseudobulk analysis is a better approach to
-# DEG testing, but that this goes beyond the scope of the analysis we perform here
-
-mapply(FUN = function(x, y) {
-  
-  markers <- FindAllMarkers(x,
-                            only.pos = TRUE,
-                            min.pct = 0.25,
-                            logfc.threshold = 0.25,
-                            slot = "data")
-  
-  #top 20 which pass adjusted p-val
-  top_markers <- markers %>%
-    dplyr::filter(p_val_adj <= 0.05) %>%
-    group_by(cluster) %>%
-    slice_max(n = 20, order_by = avg_log2FC)
-  
-  
-  file_name <- paste0(output_prefix, "/", y,"_top_markers.csv")
-  
-  write.csv(top_markers,
-            file_name,
-            row.names = FALSE)  
-  
-  # also saving unfiltered version for reference
-  write.csv(markers,
-            paste0(output_prefix, "/", y,"_all_markers.csv"),
-            row.names = FALSE) 
-  
-}, x = seurat_objs, y = names(seurat_objs))
-```
-
-
 # BLAZE MARKERS
 
 "BLAZE" markers are the gene IDs from the Blaze "Marker gene" analysis. 
