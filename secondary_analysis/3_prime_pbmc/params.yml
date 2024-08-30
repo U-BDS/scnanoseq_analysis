@@ -1,0 +1,24 @@
+# names/email
+email: "lianov@uab.edu"
+multiqc_title: "scnanoseq_10X_3_prime"
+#NOTE: for 3' data which is __V3__, default whitelist from pipeline is good to go
+
+# input samplesheet
+input: "./samplesheet.csv"
+
+# Genome references
+# genome use matching original 10X Genomics analysis from application note
+fasta: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_32/GRCh38.primary_assembly.genome.fa"
+gtf: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_32/GTF/gencode.v32.annotation.gtf"
+
+# other params
+skip_trimming: false
+skip_nanoplot: false
+min_length: 500
+min_q_score: 10
+
+# fastq options
+split_amount: 500000
+
+# barcode options
+barcode_format: "10X_3v3"

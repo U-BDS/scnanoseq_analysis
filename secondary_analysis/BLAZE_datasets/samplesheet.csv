@@ -1,0 +1,4 @@
+sample,fastq,cell_count
+ERR9958133,/data/project/U_BDS/pipeline_dev_space/sample_runs_data/Nanopore/blaze_data_globus/data/ERR9958133.fastq.gz,1000
+ERR9958134,/data/project/U_BDS/pipeline_dev_space/sample_runs_data/Nanopore/blaze_data_globus/data/ERR9958134.fastq.gz,1000
+ERR9958135,/data/project/U_BDS/pipeline_dev_space/sample_runs_data/Nanopore/blaze_data_globus/data/ERR9958135.fastq.gz,1000
