@@ -1,5 +1,5 @@
 ---
-title: "scnanoseq and BLAZE published (Ground Truth): figures"
+title: "scnanoseq and BLAZE published (Ground Truth/You et al): figures"
 author:
   - name: "Austyn Trull"
   - name: "Lara Ianov, Ph.D."
@@ -29,23 +29,24 @@ lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/"
 #### CONSTANT DEFS ####
 
 ## The prefix to output files
-output_prefix <- "./output_cross_dataset_figures"
+output_prefix <- "./output_BLAZE_dataset_figures"
 
 dir.create(file.path(output_prefix), recursive = TRUE)
 ```
 
 # Load pre-processed Seurat objects
 
-From our previous analysis for each dataset groups (original BLAZE matrices / ground-truth and BLAZE data re-processed with `nf-core/scnanoseq`), load both objects into the environment
+From our previous analysis for each dataset groups (original BLAZE matrices / You et al data and BLAZE data re-processed with `nf-core/scnanoseq`),
+load both objects into the environment
 
 ```{r}
-scnanoseq_objs <- readRDS(file = "./output_scnanoseq_data/seurat_scnanoseq_BLAZE.rds")
+scnanoseq_objs <- readRDS(file = "./output_BLAZE_scnanoseq_data/seurat_scnanoseq_BLAZE.rds")
 blaze_objs <- readRDS(file = "./output_BLAZE_published_data/seurat_BLAZE_ground_truth.rds")
 ```
 
 # Subset data to PromethION dataset
 
-Focus on main figures are for the PromethION datasets. Subset the dataset for gene and transcript level data across both analysis
+Focus on main BLAZE figures are for the PromethION datasets. Subset the dataset for gene and transcript level data across both analysis
 
 ```{r}
 scnanoseq_promith <- scnanoseq_objs[c(5,6)]
@@ -74,7 +75,7 @@ merged_meta <- mapply(FUN = function(x,y) {
   merged_meta <- merge(x = scnano_meta,
                        y = blaze_meta,
                        by = "cell_barcodes",
-                       suffixes= c("_scnanoseq", "_ground_truth"))
+                       suffixes= c("_scnanoseq", "_You_et_al"))
   
 }, x=scnanoseq_promith, y=blaze_promith, SIMPLIFY = FALSE)
 ```
@@ -86,20 +87,25 @@ merged_meta <- mapply(FUN = function(x,y) {
 
 feature_type <- gsub(".*_","",names(merged_meta))
 feature_1 <- "nFeature_RNA_scnanoseq"
-feature_2 <- "nFeature_RNA_ground_truth"
-output_feature <- "_nFeature.png"
+feature_2 <- "nFeature_RNA_You_et_al"
+output_feature <- "_nFeature.pdf"
 
 mapply(FUN = function(x,y) {
   
   scatter_plot <- scatter_corr(data.frame = x,
                                feature = feature_1,
                                feature2 = feature_2,
-                               feature_type = y)
+                               feature_type = y,
+                               title_size = 30,
+                               axis_size = 15,
+                               point_size = 2,
+                               point_alpha = 0.5) + 
+    theme(axis.title = element_text(size = 20))
   
   file_name <- paste0(output_prefix, "/", y, output_feature)
 
   #adding some room to the right to avoid axis being cutoff
-  png(filename = file_name, height = 800, width = 1000)
+  pdf(file = file_name, height = 8, width = 8)
   plot(scatter_plot + theme(plot.margin = margin(t = 20, b = 20, l = 50, r = 50)))
   dev.off()
   
@@ -111,19 +117,24 @@ mapply(FUN = function(x,y) {
 
 feature_type <- gsub(".*_","",names(merged_meta))
 feature_1 <- "nCount_RNA_scnanoseq"
-feature_2 <- "nCount_RNA_ground_truth"
-output_feature <- "_nCount.png"
+feature_2 <- "nCount_RNA_You_et_al"
+output_feature <- "_nCount.pdf"
 
 mapply(FUN = function(x,y) {
   
   scatter_plot <- scatter_corr(data.frame = x,
                                feature = feature_1,
                                feature2 = feature_2,
-                               feature_type = y)
+                               feature_type = y,
+                               title_size = 30,
+                               axis_size = 15,
+                               point_size = 2,
+                               point_alpha = 0.5) + 
+    theme(axis.title = element_text(size = 20))
   
   file_name <- paste0(output_prefix, "/", y, output_feature)
 
-  png(filename = file_name, height = 800, width = 1000)
+  pdf(file = file_name, height = 8, width = 8)
   plot(scatter_plot + theme(plot.margin = margin(t = 20, b = 20, l = 50, r = 50)))
   dev.off()
   
@@ -142,21 +153,24 @@ UMAPs <- mapply(FUN = function(x, y, z) {
   p1 <- DimPlot(x,
                 reduction = "umap",
                 label = FALSE,
-                pt.size = 2) + 
-    guides(color = guide_legend(override.aes = list(size = 6), ncol=1)) +
+                pt.size = NULL) + 
+    guides(color = guide_legend(override.aes = list(size = 4), ncol=1)) +
     ggtitle(paste0("scnanoseq: ", y)) +
-    theme(legend.text = element_text(size = 20), axis.title = element_text(size = 20),
-          plot.title = element_text(size = 30, color = title_col))
-    
+    theme(legend.text = element_text(size = 15),
+          axis.title = element_text(size = 20),
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15),
+          plot.title = element_text(size = 25, color = title_col),
+          strip.text.x = element_text(size = 20, face = "bold"))
   
   return(p1)
   
 }, x = scnanoseq_promith, y = names(scnanoseq_promith), z = feature_type)
 
 
-png(paste0(output_prefix, "/","UMAPS_scnanoseq.png"),
-    width = 800,
-    height = 800)
+pdf(paste0(output_prefix, "/","UMAPS_scnanoseq.pdf"),
+    width = 8,
+    height = 8)
 
 gridExtra::grid.arrange(grobs = UMAPs)
 
@@ -170,11 +184,15 @@ UMAPs <- mapply(FUN = function(x, y, z) {
   p1 <- DimPlot(x,
                 reduction = "umap",
                 label = FALSE,
-                pt.size = 2) + 
+                pt.size = NULL) + 
     guides(color = guide_legend(override.aes = list(size = 6), ncol=1)) +
-    ggtitle(paste0("Ground Truth: ", y)) +
-    theme(legend.text = element_text(size = 20), axis.title = element_text(size = 20),
-          plot.title = element_text(size = 30, color = title_col))
+    ggtitle(paste0("You et al: ", y)) +
+    theme(legend.text = element_text(size = 15),
+          axis.title = element_text(size = 20),
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15),
+          plot.title = element_text(size = 25, color = title_col),
+          strip.text.x = element_text(size = 20, face = "bold"))
     
   
   return(p1)
@@ -182,16 +200,16 @@ UMAPs <- mapply(FUN = function(x, y, z) {
 }, x = blaze_promith, y = names(scnanoseq_promith), z = feature_type) # using names from scnanoseq object for consistency in figures
 
 
-png(paste0(output_prefix, "/","UMAPS_ground_truth.png"),
-    width = 800,
-    height = 800)
+pdf(paste0(output_prefix, "/","UMAPS_You_et_al.pdf"),
+    width = 8,
+    height = 8)
 
 gridExtra::grid.arrange(grobs = UMAPs)
 
 dev.off()
 ```
 
-# nCount UMAPs across PromethION datasets
+# nFeature UMAPs across PromethION datasets
 
 ```{r}
 feature_type <- c("gene", "transcript") # for coloring purposes
@@ -199,19 +217,20 @@ feature_type <- c("gene", "transcript") # for coloring purposes
 UMAPs <- mapply(FUN = function(x, y, z) {
   
   title_col <- ifelse(z == "gene", "#0072B2", "#009E73")
-  
+
   p1 <- FeaturePlot(x,
                     reduction = "umap",
-                    features = "nCount_RNA",
+                    features = "nFeature_RNA",
                     label = FALSE,
-                    pt.size = 2,
-                    max.cutoff = 60000) + 
+                    pt.size = NULL) + 
     ggtitle(paste0("scnanoseq: ", y)) +
-    theme(legend.text = element_text(size = 12),
-          legend.title = element_text(size = 20),
+    theme(legend.text = element_text(size = 15),
+          legend.title = element_text(size = 15),
           axis.title = element_text(size = 20),
-          plot.title = element_text(size = 30, color = title_col)) +
-    labs(color = "UMI count")
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15),
+          plot.title = element_text(size = 25, color = title_col)) +
+    labs(color = "Feature count")
     
   
   return(p1)
@@ -219,9 +238,9 @@ UMAPs <- mapply(FUN = function(x, y, z) {
 }, x = scnanoseq_promith, y = names(scnanoseq_promith), z = feature_type)
 
 
-png(paste0(output_prefix, "/","FeaturePlot_nCount_scnanoseq.png"),
-    width = 800,
-    height = 800)
+pdf(paste0(output_prefix, "/","FeaturePlot_nFeature_scnanoseq.pdf"),
+    width = 8,
+    height = 8)
 
 gridExtra::grid.arrange(grobs = UMAPs)
 
@@ -231,29 +250,30 @@ dev.off()
 UMAPs <- mapply(FUN = function(x, y, z) {
   
   title_col <- ifelse(z == "gene", "#0072B2", "#009E73")
-  
+
   p1 <- FeaturePlot(x,
                     reduction = "umap",
-                    features = "nCount_RNA",
+                    features = "nFeature_RNA",
                     label = FALSE,
-                    pt.size = 2,
-                    max.cutoff = 60000) + 
-    ggtitle(paste0("Ground Truth: ", y)) +
-    theme(legend.text = element_text(size = 12),
-          legend.title = element_text(size = 20),
+                    pt.size = NULL) + 
+    ggtitle(paste0("You et al: ", y)) +
+    theme(legend.text = element_text(size = 15),
+          legend.title = element_text(size = 15),
           axis.title = element_text(size = 20),
-          plot.title = element_text(size = 30, color = title_col)) +
-    labs(color = "UMI count")
-    
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15),
+          plot.title = element_text(size = 25, color = title_col)) +
+    labs(color = "Feature count")
+  
   
   return(p1)
   
 }, x = blaze_promith, y = names(scnanoseq_promith), z = feature_type)
 
 
-png(paste0(output_prefix, "/","FeaturePlot_nCount_ground_truth.png"),
-    width = 800,
-    height = 800)
+pdf(paste0(output_prefix, "/","FeaturePlot_nFeature_You_et_al.pdf"),
+    width = 8,
+    height = 8)
 
 gridExtra::grid.arrange(grobs = UMAPs)
 
@@ -262,301 +282,154 @@ dev.off()
 
 # Gene specific FeaturePlot and violin plots
 
-Gene selected are based from the original Blaze analysis as examples of expression profiles from the original data vs scnanoseq. At this time only showing a few genes, although list may expand
+Gene selected are based from the original Blaze analysis as examples of expression profiles from the original data vs scnanoseq.
 
 ```{r}
 genes_of_interest <- c("PAX6", "VIM", "ELAVL4", "NRN1")
 
-### Gene scnanoseq ###
+### Gene ###
 
-# v40
-markers <- read.table("input/references/blaze_gene_markers_gencode_v40_full.csv",
-                      sep=",",
-                      header = TRUE,
-                      row.names = NULL)
-
-# fetech Ensembl IDs
-
-markers_subset <- dplyr::filter(markers, gene_name %in% genes_of_interest)
-
-# gene only obj
-# iterate through features to provide custom titles to each
-# (instead of passing in a vector)
-
-# we set max value to be consistent on scale across datasets
-max_cutoff <- c(2.5, 6, 2.5, 2.0)
-
-max_gene <- as.data.frame(cbind(genes_of_interest, max_cutoff))
-
-genes_feature <- mapply(FUN = function(x) {
-  
-  gene_name <- unique(markers_subset$gene_name[markers_subset$gene_id==x])
-  max <- max_gene$max_cutoff[max_gene$genes_of_interest==gene_name]
-  
-  p1 <- FeaturePlot(scnanoseq_promith$ERR9958135_gene,
-                    reduction = "umap",
-                    slot = "data",
-                    features = x,
-                    label = FALSE,
-                    pt.size = 2,
-                    max.cutoff = max,
-                    cols = c("#D3D3D3", "#0072B2")) + 
-    ggtitle(paste0(x, " | ",  gene_name)) +
-    theme(legend.text = element_text(size = 12),
-          legend.title = element_text(size = 20),
-          axis.title = element_text(size = 20),
-          plot.title = element_text(size = 20))
-  
-  return(p1)
-  
-}, x = unique(markers_subset$gene_id))
-
-png(paste0(output_prefix, "/","FeaturePlot_genes_scnanoseq.png"),
-    width = 800,
-    height = 800)
-
-gridExtra::grid.arrange(grobs = genes_feature, top=textGrob("scnanoseq: ERR9958135_gene\n", gp = gpar(fontsize = 30, fontface = "bold")))
-
-dev.off()
-
-# violin
-#TODO: add gene names as part of this section
-
-p1 <- VlnPlot(object = scnanoseq_promith$ERR9958135_gene,
-              split.by = "seurat_clusters",
-              features = unique(markers_subset$gene_id),
-              assay = "RNA",
-              slot = "data",
-              stack = TRUE,
-              flip = TRUE) +
-  theme(axis.title = element_text(size = 20),
-        axis.text.y.left = element_text(size = 20),
-        axis.text.y.right = element_text(size = 20),
-        plot.title = element_text(size = 20)) + 
-  NoLegend() + FontSize(20) + ggtitle("scnanoseq: ERR9958135_gene")
-
-png(paste0(output_prefix, "/","Violins_genes_scnanoseq.png"),
-    width = 500,
-    height = 800)
-
-plot(p1)
-
-dev.off()
-
-### Transcript scnanoseq ###
-
-# representative list for illustration purposes
-# based on IDs we will fetch transcript name to be user-friendly
-# IDs for transcripts from same genes plotted above
-transcript_id <- c("ENST00000241001.13", "ENST00000379111.7", "ENST00000639916.1",
-                   "ENST00000544301.7", "ENST00000357083.8", "ENST00000244766.7")
-
-# ensure all are present in marker set
-
-stopifnot(all(transcript_id %in% markers_subset$transcript_id))
-
-# we set max value to be consistent on scale across datasets
-max_cutoff <- c(1.5, 0.6, 1.5, 5.0, 1.5, 2.5)
-
-max_transcript <- as.data.frame(cbind(transcript_id, max_cutoff))
-
-transcript_feature <- mapply(FUN = function(x) {
-  
-  trans_name <- markers_subset$transcript_name[markers_subset$transcript_id==x]
-  max <- max_transcript$max_cutoff[max_transcript$transcript_id==x]
-  
-  p1 <- FeaturePlot(scnanoseq_promith$ERR9958135_transcript,
-                    reduction = "umap",
-                    slot = "data",
-                    features = x,
-                    label = FALSE,
-                    pt.size = 2,
-                    max.cutoff = max,
-                    cols = c("#D3D3D3", "#009E73")) + 
-    ggtitle(paste0(x, " | ",  trans_name)) +
-    theme(legend.text = element_text(size = 12),
-          legend.title = element_text(size = 20),
-          axis.title = element_text(size = 20),
-          plot.title = element_text(size = 20))
-  
-  return(p1)
-  
-}, x = transcript_id)
-
-png(paste0(output_prefix, "/","FeaturePlot_transcripts_scnanoseq.png"),
-    width = 800,
-    height = 800)
-
-gridExtra::grid.arrange(grobs = transcript_feature, top=textGrob("scnanoseq: ERR9958135_transcript\n", gp = gpar(fontsize = 30, fontface = "bold")))
-
-dev.off()
-
-#violin
-p1 <- VlnPlot(object = scnanoseq_promith$ERR9958135_transcript,
-              split.by = "seurat_clusters",
-              features = transcript_id,
-              assay = "RNA",
-              slot = "data",
-              stack = TRUE,
-              flip = TRUE) +
-  theme(axis.title = element_text(size = 20),
-        axis.text.y.left = element_text(size = 20),
-        axis.text.y.right = element_text(size = 20),
-        plot.title = element_text(size = 20)) + 
-  NoLegend() + FontSize(20) + ggtitle("scnanoseq: transcript")
-
-png(paste0(output_prefix, "/","Violins_transcripts_scnanoseq.png"),
-    width = 500,
-    height = 800)
-
-plot(p1)
-
-dev.off()
-```
-
-```{r}
-### Gene Blaze ###
-
-# v31
 markers <- read.table("input/references/blaze_gene_markers_gencode_v31_full.csv",
                       sep=",",
                       header = TRUE,
                       row.names = NULL)
 
-# fetech Ensembl IDs
+# fetch Ensembl IDs
 
 markers_subset <- dplyr::filter(markers, gene_name %in% genes_of_interest)
 
 # gene only obj
-# iterate through features to provide custom titles to each
-# (instead of passing in a vector)
-
-# we set max value to be consistent on scale across datasets
-max_cutoff <- c(2.5, 6, 2.5, 2.0)
-
-max_gene <- as.data.frame(cbind(genes_of_interest, max_cutoff))
 
 genes_feature <- mapply(FUN = function(x) {
   
   gene_name <- unique(markers_subset$gene_name[markers_subset$gene_id==x])
-  max <- max_gene$max_cutoff[max_gene$genes_of_interest==gene_name]
-  
-  p1 <- FeaturePlot(blaze_objs$promith_gene,
+
+  p1 <- FeaturePlot(scnanoseq_promith$ERR9958135_gene,
                     reduction = "umap",
+                    slot = "data",
                     features = x,
                     label = FALSE,
-                    pt.size = 2,
-                    max.cutoff = max,
                     cols = c("#D3D3D3", "#0072B2")) + 
     ggtitle(paste0(x, " | ",  gene_name)) +
-    theme(legend.text = element_text(size = 12),
-          legend.title = element_text(size = 20),
+    theme(legend.text = element_text(size = 15),
+          legend.title = element_text(size = 15),
           axis.title = element_text(size = 20),
-          plot.title = element_text(size = 20))
+          plot.title = element_text(size = 20),
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15))
   
   return(p1)
   
 }, x = unique(markers_subset$gene_id))
 
-png(paste0(output_prefix, "/","FeaturePlot_genes_blaze.png"),
-    width = 800,
-    height = 800)
+pdf(paste0(output_prefix, "/","FeaturePlot_genes_scnanoseq.pdf"),
+    width = 10,
+    height = 8)
 
-gridExtra::grid.arrange(grobs = genes_feature, top=textGrob("Ground Truth: ERR9958135_gene\n", gp = gpar(fontsize = 30, fontface = "bold")))
-
-dev.off()
-
-# violin
-
-p1 <- VlnPlot(object = blaze_objs$promith_gene,
-              split.by = "seurat_clusters",
-              features = unique(markers_subset$gene_id),
-              assay = "RNA",
-              slot = "data",
-              stack = TRUE,
-              flip = TRUE) +
-  theme(axis.title = element_text(size = 20),
-        axis.text.y.left = element_text(size = 20),
-        axis.text.y.right = element_text(size = 20),
-        plot.title = element_text(size = 20)) + 
-  NoLegend() + FontSize(20) + ggtitle("Ground Truth: ERR9958135_gene")
-
-png(paste0(output_prefix, "/","Violins_genes_ground_truth.png"),
-    width = 500,
-    height = 800)
-
-plot(p1)
+gridExtra::grid.arrange(grobs = genes_feature, top=textGrob("scnanoseq: ERR9958135_gene", gp = gpar(fontsize = 25, fontface = "bold")))
 
 dev.off()
 
-### Transcript blaze ###
+genes_feature <- mapply(FUN = function(x) {
+  
+  gene_name <- unique(markers_subset$gene_name[markers_subset$gene_id==x])
+
+  p1 <- FeaturePlot(blaze_objs$promith_gene,
+                    reduction = "umap",
+                    features = x,
+                    label = FALSE,
+                    cols = c("#D3D3D3", "#0072B2")) + 
+    ggtitle(paste0(x, " | ",  gene_name)) +
+    theme(legend.text = element_text(size = 15),
+          legend.title = element_text(size = 15),
+          axis.title = element_text(size = 20),
+          plot.title = element_text(size = 20),
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15))
+  
+  return(p1)
+  
+}, x = unique(markers_subset$gene_id))
+
+pdf(paste0(output_prefix, "/","FeaturePlot_genes_blaze.pdf"),
+    width = 10,
+    height = 8)
+
+gridExtra::grid.arrange(grobs = genes_feature, top=textGrob("You et al: ERR9958135_gene", gp = gpar(fontsize = 25, fontface = "bold")))
+
+dev.off()
+
+
+### Transcript ###
 
 # representative list for illustration purposes
 # based on IDs we will fetch transcript name to be user-friendly
 # IDs for transcripts from same genes plotted above
 transcript_id <- c("ENST00000241001.13", "ENST00000379111.7", "ENST00000639916.1",
-                   "ENST00000544301.7", "ENST00000357083.8", "ENST00000244766.7")
+                   "ENST00000544301.7", "ENST00000485947.1", "ENST00000487938.5",
+                   "ENST00000357083.8", "ENST00000371823.8", "ENST00000244766.7")
 
 # ensure all are present in marker set
 
 stopifnot(all(transcript_id %in% markers_subset$transcript_id))
 
-# we set max value to be consistent on scale across datasets
-max_cutoff <- c(1.5, 0.6, 1.5, 5.0, 1.5, 2.5)
+transcript_feature <- mapply(FUN = function(x) {
+  
+  trans_name <- markers_subset$transcript_name[markers_subset$transcript_id==x]
 
-max_transcript <- as.data.frame(cbind(transcript_id, max_cutoff))
+  p1 <- FeaturePlot(scnanoseq_promith$ERR9958135_transcript,
+                    reduction = "umap",
+                    slot = "data",
+                    features = x,
+                    label = FALSE,
+                    cols = c("#D3D3D3", "#009E73")) + 
+    ggtitle(paste0(x, " | ",  trans_name)) +
+    theme(legend.text = element_text(size = 15),
+          legend.title = element_text(size = 15),
+          axis.title = element_text(size = 20),
+          plot.title = element_text(size = 20),
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15))
+  
+  return(p1)
+  
+}, x = transcript_id)
+
+pdf(paste0(output_prefix, "/","FeaturePlot_transcripts_scnanoseq.pdf"),
+    width = 15,
+    height = 10)
+
+gridExtra::grid.arrange(grobs = transcript_feature, top=textGrob("scnanoseq: ERR9958135_transcript", gp = gpar(fontsize = 25, fontface = "bold")))
+
+dev.off()
 
 transcript_feature <- mapply(FUN = function(x) {
 
   trans_name <- markers_subset$transcript_name[markers_subset$transcript_id==x]
-  max <- max_transcript$max_cutoff[max_transcript$transcript_id==x]
   
   p1 <- FeaturePlot(blaze_objs$promith_trans,
                     reduction = "umap",
                     slot = "data",
                     features = x,
                     label = FALSE,
-                    pt.size = 2,
-                    max.cutoff = max,
                     cols = c("#D3D3D3", "#009E73")) + 
     ggtitle(paste0(x, " | ",  trans_name)) +
-    theme(legend.text = element_text(size = 12),
-          legend.title = element_text(size = 20),
+    theme(legend.text = element_text(size = 15),
+          legend.title = element_text(size = 15),
           axis.title = element_text(size = 20),
-          plot.title = element_text(size = 20))
+          plot.title = element_text(size = 20),
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15))
   
   return(p1)
   
 }, x = transcript_id)
 
-png(paste0(output_prefix, "/","FeaturePlot_transcripts_ground_truth.png"),
-    width = 800,
-    height = 800)
+pdf(paste0(output_prefix, "/","FeaturePlot_transcripts_You_et_al.pdf"),
+    width = 15,
+    height = 10)
 
-gridExtra::grid.arrange(grobs = transcript_feature, top=textGrob("Ground Truth: ERR9958135_transcript\n", gp = gpar(fontsize = 30, fontface = "bold")))
-
-dev.off()
-
-
-#violin
-p1 <- VlnPlot(object = blaze_objs$promith_trans,
-              split.by = "seurat_clusters",
-              features = transcript_id,
-              assay = "RNA",
-              slot = "data",
-              stack = TRUE,
-              flip = TRUE) +
-  theme(axis.title = element_text(size = 20),
-        axis.text.y.left = element_text(size = 20),
-        axis.text.y.right = element_text(size = 20),
-        plot.title = element_text(size = 20)) + 
-  NoLegend() + FontSize(20) + ggtitle("Ground Truth: transcript")
-
-png(paste0(output_prefix, "/","Violins_transcripts_ground_truth.png"),
-    width = 500,
-    height = 800)
-
-plot(p1)
+gridExtra::grid.arrange(grobs = transcript_feature, top=textGrob("You et al: ERR9958135_transcript", gp = gpar(fontsize = 25, fontface = "bold")))
 
 dev.off()
 ```
