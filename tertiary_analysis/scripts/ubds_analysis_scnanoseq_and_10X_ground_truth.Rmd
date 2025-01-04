@@ -20,10 +20,20 @@ The input are the following files from the pipeline:
 
 ```
 input/scnanoseq_10X_data/
-├── SC3pv3_GEX_Human_PBMC_ONT.gene_counts.tsv
-├── SC3pv3_GEX_Human_PBMC_ONT.transcript_counts.tsv
-├── SC5pv2_GEX_Human_Lung_Carcinoma_DTC_ONT.gene_counts.tsv
-└── SC5pv2_GEX_Human_Lung_Carcinoma_DTC_ONT.transcript_counts.tsv
+├── isoquant
+│├── SC3pv3_GEX_Human_PBMC_ONT.gene.merged.tsv
+│├── SC3pv3_GEX_Human_PBMC_ONT.transcript.merged.tsv
+│├── SC5pv2_GEX_Human_Lung_Carcinoma_DTC_ONT.gene.merged.tsv
+│└── SC5pv2_GEX_Human_Lung_Carcinoma_DTC_ONT.transcript.merged.tsv
+└── oarfish
+    ├── 3_prime
+    │├── barcodes.tsv.gz
+    │├── features.tsv.gz
+    │└── matrix.mtx.gz
+    └── 5_prime
+        ├── barcodes.tsv.gz
+        ├── features.tsv.gz
+        └── matrix.mtx.gz
 
 input/CellRanger_10X_data/
 ├── SC3pv3_GEX_Human_PBMC_filtered_feature_bc_matrix.h5
@@ -58,24 +68,35 @@ output_prefix <- "./output_scnanoseq_10X_data"
 
 ### --- scnanoseq Oxford data --- ###
 # input files (sample and feature type [gene/transcript])
-in_files_scnanoseq <- dir("./input/scnanoseq_10X_data",full.names = TRUE)
-in_files_scnanoseq
+in_files_scnanoseq_isoquant <- dir("./input/scnanoseq_10X_data/isoquant",full.names = TRUE)
+in_files_scnanoseq_isoquant
+
+in_files_scnanoseq_oarfish <- dir("./input/scnanoseq_10X_data/oarfish",full.names = TRUE)
+in_files_scnanoseq_oarfish
 
 # sample names
-sample_names_scnanoseq <- dir("./input/scnanoseq_10X_data",full.names = FALSE)
-sample_names_scnanoseq <- gsub("_.*","",sample_names_scnanoseq)
+sample_names_scnanoseq_isoquant <- dir("./input/scnanoseq_10X_data/isoquant",full.names = FALSE)
+sample_names_scnanoseq_isoquant <- gsub("_.*","",sample_names_scnanoseq_isoquant)
+
+sample_names_scnanoseq_oarfish <- dir("./input/scnanoseq_10X_data/oarfish",full.names = FALSE)
+sample_names_scnanoseq_oarfish <- gsub("_.*","",sample_names_scnanoseq_oarfish)
 
 # feature
-feature_type_scnanoseq <- dir("./input/scnanoseq_10X_data",full.names = FALSE)
-feature_type_scnanoseq <- gsub(".*_ONT.","",feature_type_scnanoseq)
+feature_type_scnanoseq_isoquant <- dir("./input/scnanoseq_10X_data/isoquant",full.names = FALSE)
+feature_type_scnanoseq_isoquant <- gsub(".*_ONT.","",feature_type_scnanoseq_isoquant)
 
-feature_type_scnanoseq <- gsub("_.*","",feature_type_scnanoseq)
+feature_type_scnanoseq_isoquant <- gsub("\\..*","",feature_type_scnanoseq_isoquant)
 
-feature_type_scnanoseq
+feature_type_scnanoseq_isoquant
+
+feature_type_scnanoseq_oarfish <- c("transcript", "transcript")
 
 # clean basenames with feature type
-basenames_scnanoseq <- paste0(sample_names_scnanoseq, "_", feature_type_scnanoseq)
-basenames_scnanoseq
+basenames_scnanoseq_isoquant <- paste0(sample_names_scnanoseq_isoquant, "_", feature_type_scnanoseq_isoquant, "_isoquant")
+basenames_scnanoseq_isoquant
+
+basenames_scnanoseq_oarfish <- paste0(sample_names_scnanoseq_oarfish, "_", feature_type_scnanoseq_oarfish, "_oarfish")
+basenames_scnanoseq_oarfish
 
 ### --- CellRanger (CR) Illumina data --- ###
 
@@ -99,17 +120,42 @@ basenames_CR
 Import matrices, perform Ensembl to gene/transcript name conversion, make Seurat objects
 
 ```{r}
+### isoquant ###
 dir.create(file.path(output_prefix), recursive = TRUE)
 
 # Read in the matrices
 # At this time, gene and transcript will be part of the same list.
 # If needed, feature type can be split at a later time
-cell_bc_matrix <- lapply(setNames(in_files_scnanoseq,
-                                 make.names(basenames_scnanoseq)),
-               read.table, sep = "\t", header = TRUE, row.names = 1)
+cell_bc_matrix_isoquant <- lapply(setNames(in_files_scnanoseq_isoquant,
+                                           make.names(basenames_scnanoseq_isoquant)),
+                                  read.table, sep = "\t", header = TRUE, row.names = 1)
+
+### oarfish ###
+cell_bc_matrix_oarfish <- lapply(setNames(in_files_scnanoseq_oarfish,
+                                          make.names(basenames_scnanoseq_oarfish)),
+                                 Read10X, gene.column = 1, cell.column = 1)
+
+# select the transcript names for oarfish data
+
+cell_bc_matrix_oarfish <- lapply(X = cell_bc_matrix_oarfish, FUN = function(x) {
+  
+  rows <- rownames(x)
+  transcript_names <- do.call(rbind, strsplit(rows, split = '|', fixed = TRUE))
+  
+  # col 5 corresponds to transcript names
+  names <- transcript_names[,5]
+  
+  # convert all - to . for consistancy with isoquant data (not needed otherwise)
+  names <- gsub("-", ".", names)
+  
+  row.names(x) <- names
+  
+  return(x)
+  
+})
 ```
 
-Convert Ensembl ids to gene/transcript names for scnanoseq data
+Convert Ensembl ids to gene/transcript names for scnanoseq isoquant data as well:
 
 
 ```{r, eval=FALSE}
@@ -131,7 +177,7 @@ hg38_annot
 ```
 
 ```{r}
-cell_bc_matrix_genes <- mapply(FUN = function(x,y,n) {
+cell_bc_matrix_names_isoquant <- mapply(FUN = function(x,y,n) {
   
   if (y == "gene") {
     
@@ -155,7 +201,7 @@ cell_bc_matrix_genes <- mapply(FUN = function(x,y,n) {
     
     #save id_map
     
-    file_name <- paste0(output_prefix, "/", names(cell_bc_matrix[n]), "_id_map.csv")
+    file_name <- paste0(output_prefix, "/", names(cell_bc_matrix_isoquant[n]), "_id_map.csv")
     
     write.csv(id_map, file = file_name, row.names = FALSE)
     
@@ -182,7 +228,7 @@ cell_bc_matrix_genes <- mapply(FUN = function(x,y,n) {
     
     #save id_map
     
-    file_name <- paste0(output_prefix, "/", names(cell_bc_matrix[n]), "_id_map.csv")
+    file_name <- paste0(output_prefix, "/", names(cell_bc_matrix_isoquant[n]), "_id_map.csv")
     
     write.csv(id_map, file = file_name, row.names = FALSE)
     
@@ -190,12 +236,12 @@ cell_bc_matrix_genes <- mapply(FUN = function(x,y,n) {
   
   return(x)
   
-}, x=cell_bc_matrix, y=feature_type_scnanoseq, n=1:length((cell_bc_matrix)), SIMPLIFY = FALSE)
+}, x=cell_bc_matrix_isoquant, y=feature_type_scnanoseq_isoquant, n=1:length((cell_bc_matrix_isoquant)), SIMPLIFY = FALSE)
 ```
 
 
 ```{r}
-rm(cell_bc_matrix)
+rm(cell_bc_matrix_isoquant)
 gc()
 ```
 
@@ -205,7 +251,7 @@ scnanoseq objects
 
 ```{r}
 # Create the seurat object using RNA Assay
-seurat_objs_scnanoseq <- mapply(FUN = function(x,y) {
+seurat_objs_scnanoseq_isoquant <- mapply(FUN = function(x,y) {
   
   seurat_obj <- CreateSeuratObject(
     counts = x,
@@ -216,7 +262,20 @@ seurat_objs_scnanoseq <- mapply(FUN = function(x,y) {
   
   return(seurat_obj)
   
-}, x=cell_bc_matrix_genes, y=names(cell_bc_matrix_genes))
+}, x=cell_bc_matrix_names_isoquant, y=names(cell_bc_matrix_names_isoquant))
+
+seurat_objs_scnanoseq_oarfish <- mapply(FUN = function(x,y) {
+  
+  seurat_obj <- CreateSeuratObject(
+    counts = x,
+    assay = "RNA",
+    min.cells = 1,
+    min.features = 1,
+    project = y)
+  
+  return(seurat_obj)
+  
+}, x=cell_bc_matrix_oarfish, y=names(cell_bc_matrix_oarfish))
 ```
 
 CR objects
@@ -244,9 +303,9 @@ seurat_objs_CR <- mapply(FUN = function(x,y) {
 Combining all objects into a single list to easily iterate over all until object integration
 
 ```{r}
-seurat_objs <- c(seurat_objs_scnanoseq, seurat_objs_CR)
+seurat_objs <- c(seurat_objs_scnanoseq_isoquant, seurat_objs_scnanoseq_oarfish, seurat_objs_CR)
 
-feature_type_all <- c(feature_type_scnanoseq, feature_type_CR)
+feature_type_all <- c(feature_type_scnanoseq_isoquant, feature_type_scnanoseq_oarfish, feature_type_CR)
 ```
 
 
@@ -525,7 +584,7 @@ merged_meta <- mapply(FUN = function(x,y) {
   # Change NA to 0 to display any barcodes unique to each dataset
   merged_meta <- merged_meta %>% mutate_if(is.numeric, ~replace_na(., 0))
   
-}, x=seurat_objs[c(1,3)], y=seurat_objs[c(5,6)], SIMPLIFY = FALSE)
+}, x=seurat_objs[c(1,3)], y=seurat_objs[c(7,8)], SIMPLIFY = FALSE)
 ```
 
 ```{r}
@@ -587,7 +646,7 @@ saveRDS(seurat_objs, paste0(output_prefix,"/all_10X_prefilter.rds"))
 
 ```{r}
 # filtering criteria b/t gene and transcript is != based on QC plot
-nFeature_RNA_min <- c(500, 800, 500, 800, 500, 500)
+nFeature_RNA_min <- c(500, 800, 500, 800, 800, 800, 500, 500)
 
 # filter
 seurat_objs <- mapply(FUN = function(x, y) {
@@ -701,7 +760,7 @@ write.csv(cell_count, paste0(output_prefix, "/cell_count_post_filtering.csv"), r
 
 # Correlation plots between gene-level scnanoseq and CR dataset (post-filtering)
 
-Unlike with the raw data, here we only investigate pattern across common cells retained due to differences in the effect that MT filtering is causing due to higher MT genes detected in Oxford vs Illumina.
+Unlike with the raw data, here we only investigate the pattern across common cells retained due to differences in the effect that MT filtering is causing due to higher MT genes detected in Oxford vs Illumina.
 
 ```{r}
 # merge metadata based on barcodes from scnanoseq and CR runs (gene-level only)
@@ -728,7 +787,7 @@ merged_meta <- mapply(FUN = function(x,y) {
   # Change NA to 0 to display any barcodes unique to each dataset
   merged_meta <- merged_meta %>% mutate_if(is.numeric, ~replace_na(., 0))
   
-}, x=seurat_objs[c(1,3)], y=seurat_objs[c(5,6)], SIMPLIFY = FALSE)
+}, x=seurat_objs[c(1,3)], y=seurat_objs[c(7,8)], SIMPLIFY = FALSE)
 ```
 
 ```{r}
@@ -818,8 +877,8 @@ For the gene-level datasets, we integrate the Oxford and Illumina data for 3' an
 ```{r}
 # subset per sample object, to only datasets to be integrated (gene-level only)
 
-seurat_objs_3_prime <- seurat_objs[c("SC3pv3_gene", "SC3pv3_gene_illumina")]
-seurat_objs_5_prime <- seurat_objs[c("SC5pv2_gene", "SC5pv2_gene_illumina")]
+seurat_objs_3_prime <- seurat_objs[c("SC3pv3_gene_isoquant", "SC3pv3_gene_illumina")]
+seurat_objs_5_prime <- seurat_objs[c("SC5pv2_gene_isoquant", "SC5pv2_gene_illumina")]
 ```
 
 ```{r}
@@ -991,7 +1050,7 @@ dir.create(dim_output_dir, recursive = TRUE)
 
 seurat_obj_tmp <- seurat_int
 
-cluster_res <- seq(from = 0.1, to = 0.7, by = 0.1)
+cluster_res <- seq(from = 0.4, to = 0.8, by = 0.1)
 
 #NOTE: for future validations, can focus on higher dims (move range up)
 dim <- seq(from = 25, to = 27, by = 1)
@@ -1062,7 +1121,7 @@ dim <- 25
 
 tmp_seurat_clustree <- seurat_int
 
-clustree_res <- seq(from = 0, to = 0.7, by = 0.1)
+clustree_res <- seq(from = 0.3, to = 0.8, by = 0.1)
 
 res <- tidyr::expand_grid(clustree_res, dim)
 
@@ -1109,7 +1168,7 @@ to the azimith clusters. Further refinement can be performed for other types of 
 
 ```{r}
 final_dim <- c(25, 27)
-final_res <- c(0.7, 0.5)
+final_res <- c(0.7, 0.6)
 
 seurat_int <- mapply(FUN = function(x,y,z) {
   
@@ -1285,7 +1344,10 @@ saveRDS(seurat_int, paste0(output_prefix,"/seurat_int_gene_level.rds"))
 ## PCA AND ELBOW PLOT
 
 ```{r}
-seurat_objs_transcript <- seurat_objs[c("SC3pv3_transcript", "SC5pv2_transcript")]
+seurat_objs_transcript <- seurat_objs[c("SC3pv3_transcript_isoquant", "SC3pv3_transcript_oarfish",
+                                        "SC5pv2_transcript_isoquant", "SC5pv2_transcript_oarfish")]
+
+tissue_type <- c("pbmc", "pbmc", "lung", "lung")
 
 # Add azimuth metadata and compute how many cells contain this metadata in transcript datasets
 
@@ -1294,15 +1356,21 @@ seurat_objs_transcript <- mapply(FUN = function(x, y) {
   
   # trim down metadata to variables desired to be added to main obj
   
-  meta <- as.data.frame(y@meta.data)
-  
-  meta <- dplyr::select(meta, starts_with(c("predicted.", "mapping.")))
-  
+  if (y == "pbmc") {
+    meta <- as.data.frame(seurat_int_azimuth$SC3pv3_gene_int@meta.data)
+    
+    meta <- dplyr::select(meta, starts_with(c("predicted.", "mapping.")))
+  } else {
+    meta <- as.data.frame(seurat_int_azimuth$SC5pv2_gene_int@meta.data)
+    
+    meta <- dplyr::select(meta, starts_with(c("predicted.", "mapping.")))
+  }
+
   seurat_obj <- AddMetaData(x, meta)
   
   return(seurat_obj)
   
-}, x=seurat_objs_transcript, y=seurat_int_azimuth)
+}, x=seurat_objs_transcript, y=tissue_type)
 
 lapply(X = seurat_objs_transcript, FUN = function(x) {
     
@@ -1310,10 +1378,10 @@ lapply(X = seurat_objs_transcript, FUN = function(x) {
 
 })
 
-# choose one prediction and compute ratio of how many cells contain azimuth annotation:
+# choose one prediction level and compute ratio of how many cells contain azimuth annotation:
 percent_ratio <- mapply(FUN = function(x, y) {
   
-  if (y == "SC3pv3_transcript") {
+  if (y == "pbmc") {
     cell_prediction <- "predicted.celltype.l2"
   } else {
     cell_prediction <- "predicted.ann_level_3"
@@ -1327,13 +1395,17 @@ percent_ratio <- mapply(FUN = function(x, y) {
   
   print((cell_with_meta / nrow(x@meta.data)) * 100)
   
-}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+}, x = seurat_objs_transcript, y = tissue_type)
 
 # save ratio of BCs with Azimuth annotation
 write.csv(as.data.frame(percent_ratio), paste0(output_prefix,"/percent_barcodes_with_azimuth.csv"))
 ```
 
-NOTE: In the current analysis. all cells from the 3' and 5' datasets contained an annotation that was transferred from gene to transcript (100%)
+NOTE: In the current analysis. all cells from the 3' and 5' isoquant datasets contained an annotation that was transferred from gene to transcript (100%)
+
+For oarfish, 97-98% was the transfer rate (expected given the input to gene-level was isoquant). Users are encouraged 
+to further label any non-annotated cells based on localization / cell marker expression or input gene-level oarfish data (beyond the scope of this validation analysis). Most of the cells that did not receive a label were cells that were
+dropped in QC steps from isoquant outputs, but retained in oarfish.
 
 ```{r}
 seurat_objs_transcript <- mapply(FUN = function(x) {
@@ -1373,7 +1445,7 @@ dir.create(dim_output_dir, recursive = TRUE)
 
 seurat_obj_tmp <- seurat_objs_transcript
 
-cluster_res <- seq(from = 0.1, to = 0.9, by = 0.1)
+cluster_res <- seq(from = 0.4, to = 0.9, by = 0.1)
 
 dim <- seq(from = 25, to = 27, by = 1)
 
@@ -1409,7 +1481,7 @@ for (obj in names(seurat_obj_tmp) ) {
     
     # plot second/third level of azimuth predicted cell types
     
-    if (obj == "SC3pv3_transcript") {
+    if (obj == "SC3pv3_transcript_isoquant" || obj == "SC3pv3_transcript_oarfish") {
       cell_prediction <- "predicted.celltype.l2"
     } else {
       cell_prediction <- "predicted.ann_level_3"
@@ -1444,7 +1516,7 @@ dim <- 25
 
 tmp_seurat_clustree <- seurat_objs_transcript
 
-clustree_res <- seq(from = 0, to = 0.9, by = 0.1)
+clustree_res <- seq(from = 0.4, to = 0.9, by = 0.1)
 
 res <- tidyr::expand_grid(clustree_res, dim)
 
@@ -1489,7 +1561,7 @@ With appropriate dim and res, cluster the objects:
 
 ```{r}
 final_dim <- 25
-final_res <- c(0.8, 0.6)
+final_res <- c(0.8, 0.8, 0.6, 0.6)
 
 seurat_objs_transcript <- mapply(FUN = function(x,y) {
   
@@ -1509,7 +1581,7 @@ seurat_objs_transcript <- mapply(FUN = function(x,y) {
 }, x = seurat_objs_transcript, y = final_res)
 ```
 
-## POST-INTEGRATION PLOTS (transcript-level)
+## POST-LABEL PLOTS (transcript-level)
 
 ### UMAPS with predicted cell types
 ```{r}
@@ -1520,10 +1592,10 @@ all_UMAPS <- mapply(FUN = function(x, y) {
                 label = TRUE,
                 pt.size = 1) + 
     guides(color = guide_legend(override.aes = list(size = 8), ncol=1)) +
-    theme(legend.text = element_text(size = 30)) +
+    theme(legend.text = element_text(size = 15)) +
     ggtitle(paste0("Transcript-level: ", y))
   
-  if (y == "SC3pv3_transcript") {
+  if (y == "SC3pv3_transcript_isoquant" || y == "SC3pv3_transcript_oarfish") {
     cell_prediction <- "predicted.celltype.l2"
   } else {
     cell_prediction <- "predicted.ann_level_3"
@@ -1535,7 +1607,7 @@ all_UMAPS <- mapply(FUN = function(x, y) {
                 label = TRUE,
                 pt.size = 1) + 
     guides(color = guide_legend(override.aes = list(size = 8), ncol=1)) +
-    theme(legend.text = element_text(size = 30))
+    theme(legend.text = element_text(size = 15))
   
   return(p1 + p2)
   
@@ -1543,19 +1615,19 @@ all_UMAPS <- mapply(FUN = function(x, y) {
 
 
 png(paste0(output_prefix, "/","All_UMAPS_pbmc_transcript.png"),
-    width = 2000,
+    width = 2500,
     height = 1200)
 
-plot(all_UMAPS$SC3pv3_transcript)
+plot(all_UMAPS$SC3pv3_transcript_isoquant + all_UMAPS$SC3pv3_transcript_oarfish)
 
 dev.off()
 
 png(paste0(output_prefix, "/","All_UMAPS_lung_transcript.png"),
-    width = 2000,
+    width = 2500,
     height = 1200)
 
 
-plot(all_UMAPS$SC5pv2_transcript)
+plot(all_UMAPS$SC5pv2_transcript_isoquant + all_UMAPS$SC5pv2_transcript_oarfish)
 
 dev.off()
 ```
@@ -1573,7 +1645,7 @@ dir.create(paste0(output_prefix, "/post_label_QCs"), recursive = TRUE)
 # just counts, no proportion here
 mapply(FUN = function(x, y) {
   
-  if (y == "SC3pv3_transcript") {
+  if (y == "SC3pv3_transcript_isoquant" || y == "SC3pv3_transcript_oarfish") {
     cell_prediction <- "predicted.celltype.l2"
   } else {
     cell_prediction <- "predicted.ann_level_3"
@@ -1617,18 +1689,33 @@ print(pbmc_features)
 
 # search for all transcript under a gene name
 
-pbmc_trascripts <- list()
+### isoquant ###
+pbmc_trascripts_isoquant <- list()
 
 # Searches for transcript features within SCT counts
-pbmc_trascripts <- mapply(FUN = function(x) {
+pbmc_trascripts_isoquant <- mapply(FUN = function(x) {
   
   feature <- grep(pattern = paste0("^", x, "\\."),
-                  x = rownames(seurat_objs_transcript$SC3pv3_transcript@assays$SCT@counts),
+                  x = rownames(seurat_objs_transcript$SC3pv3_transcript_isoquant@assays$SCT@counts),
                   value = TRUE)
   
 }, x = pbmc_features, SIMPLIFY = FALSE)
 
-pbmc_trascripts <- pbmc_trascripts[lengths(pbmc_trascripts) > 0]
+pbmc_trascripts_isoquant <- pbmc_trascripts_isoquant[lengths(pbmc_trascripts_isoquant) > 0]
+
+### oarfish ###
+pbmc_trascripts_oarfish <- list()
+
+# Searches for transcript features within SCT counts
+pbmc_trascripts_oarfish <- mapply(FUN = function(x) {
+  
+  feature <- grep(pattern = paste0("^", x, "\\."),
+                  x = rownames(seurat_objs_transcript$SC3pv3_transcript_oarfish@assays$SCT@counts),
+                  value = TRUE)
+  
+}, x = pbmc_features, SIMPLIFY = FALSE)
+
+pbmc_trascripts_oarfish <- pbmc_trascripts_oarfish[lengths(pbmc_trascripts_oarfish) > 0]
 
 ### LUNG FEATURES ###
 
@@ -1645,18 +1732,31 @@ lung_features <- lung_features[!grepl("-", lung_features)]
 
 # search for all transcript under a gene name
 
-lung_transcripts <- list()
+lung_transcripts_isoquant <- list()
 
+### isoquant ###
 # Searches for transcript features within SCT counts
-lung_transcripts <- mapply(FUN = function(x) {
+lung_transcripts_isoquant <- mapply(FUN = function(x) {
   
   feature <- grep(pattern = paste0("^", x, "\\."),
-                  x = rownames(seurat_objs_transcript$SC5pv2_transcript@assays$SCT@counts),
+                  x = rownames(seurat_objs_transcript$SC5pv2_transcript_isoquant@assays$SCT@counts),
                   value = TRUE)
   
 }, x = lung_features, SIMPLIFY = FALSE)
 
-lung_transcripts <- lung_transcripts[lengths(lung_transcripts) > 0]
+lung_transcripts_isoquant <- lung_transcripts_isoquant[lengths(lung_transcripts_isoquant) > 0]
+
+### oarfish ###
+# Searches for transcript features within SCT counts
+lung_transcripts_oarfish <- mapply(FUN = function(x) {
+  
+  feature <- grep(pattern = paste0("^", x, "\\."),
+                  x = rownames(seurat_objs_transcript$SC5pv2_transcript_oarfish@assays$SCT@counts),
+                  value = TRUE)
+  
+}, x = lung_features, SIMPLIFY = FALSE)
+
+lung_transcripts_oarfish <- lung_transcripts_oarfish[lengths(lung_transcripts_oarfish) > 0]
 
 ### gene ###
 
@@ -1709,29 +1809,55 @@ mapply(FUN = function(x) {
 
 mapply(FUN = function(x,y) {
   
-  p1 <- FeaturePlot(object = seurat_objs_transcript$SC3pv3_transcript,
+  p1 <- FeaturePlot(object = seurat_objs_transcript$SC3pv3_transcript_isoquant,
                     cols = c("lightgrey", "#0072B2"),
                     features = x, reduction = "umap",
                     keep.scale = "all") # all for visualization across isoforms
   
-  png(paste0(output_prefix, "/feature_expression/",y, "_pbmc_transcript.png"),width=1500,height=1200)
+  png(paste0(output_prefix, "/feature_expression/",y, "_pbmc_transcript_isoquant.png"),width=1500,height=1200)
   plot(p1)
   dev.off()
   
-}, x = pbmc_trascripts, y = names(pbmc_trascripts))
+}, x = pbmc_trascripts_isoquant, y = names(pbmc_trascripts_isoquant))
 
 mapply(FUN = function(x,y) {
   
-  p1 <- FeaturePlot(object = seurat_objs_transcript$SC5pv2_transcript,
+  p1 <- FeaturePlot(object = seurat_objs_transcript$SC3pv3_transcript_oarfish,
                     cols = c("lightgrey", "#0072B2"),
                     features = x, reduction = "umap",
                     keep.scale = "all") # all for visualization across isoforms
   
-  png(paste0(output_prefix, "/feature_expression/",y, "_lung_transcript.png"),width=1800,height=1200)
+  png(paste0(output_prefix, "/feature_expression/",y, "_pbmc_transcript_oarfish.png"),width=1500,height=1200)
   plot(p1)
   dev.off()
   
-}, x = lung_transcripts, y = names(lung_transcripts))
+}, x = pbmc_trascripts_oarfish, y = names(pbmc_trascripts_oarfish))
+
+mapply(FUN = function(x,y) {
+  
+  p1 <- FeaturePlot(object = seurat_objs_transcript$SC5pv2_transcript_isoquant,
+                    cols = c("lightgrey", "#0072B2"),
+                    features = x, reduction = "umap",
+                    keep.scale = "all") # all for visualization across isoforms
+  
+  png(paste0(output_prefix, "/feature_expression/",y, "_lung_transcript_isoquant.png"),width=1800,height=1200)
+  plot(p1)
+  dev.off()
+  
+}, x = lung_transcripts_isoquant, y = names(lung_transcripts_isoquant))
+
+mapply(FUN = function(x,y) {
+  
+  p1 <- FeaturePlot(object = seurat_objs_transcript$SC5pv2_transcript_oarfish,
+                    cols = c("lightgrey", "#0072B2"),
+                    features = x, reduction = "umap",
+                    keep.scale = "all") # all for visualization across isoforms
+  
+  png(paste0(output_prefix, "/feature_expression/",y, "_lung_transcript_oarfish.png"),width=1800,height=1200)
+  plot(p1)
+  dev.off()
+  
+}, x = lung_transcripts_oarfish, y = names(lung_transcripts_oarfish))
 ```
 
 ```{r}
