@@ -65,8 +65,8 @@ seurat_objs_transcript <- mapply(FUN = function(x,y) {
 
 # Add sample metadata to integrated object which is more user-friendly for readers
 
-seurat_int$SC3pv3_gene_int$sample_info <- ifelse(seurat_int$SC3pv3_gene_int@meta.data$orig.ident == "SC3pv3_gene", yes = "scnanoseq_Oxford", no = "CR_Illumina")
-seurat_int$SC5pv2_gene_int$sample_info <- ifelse(seurat_int$SC5pv2_gene_int@meta.data$orig.ident == "SC5pv2_gene", yes = "scnanoseq_Oxford", no = "CR_Illumina")
+seurat_int$SC3pv3_gene_int$sample_info <- ifelse(seurat_int$SC3pv3_gene_int@meta.data$orig.ident == "SC3pv3_gene_isoquant", yes = "scnanoseq_Oxford", no = "CR_Illumina")
+seurat_int$SC5pv2_gene_int$sample_info <- ifelse(seurat_int$SC5pv2_gene_int@meta.data$orig.ident == "SC5pv2_gene_isoquant", yes = "scnanoseq_Oxford", no = "CR_Illumina")
 ```
 
 # UMAPs (Gene-level)
@@ -113,14 +113,28 @@ mapply(FUN = function(x, y) {
 ```{r}
 mapply(FUN = function(x, y) {
   
-  if (y == "SC3pv3_transcript") {
+  if (y == "SC3pv3_transcript_isoquant" || y == "SC3pv3_transcript_oarfish") {
     cell_prediction <- "predicted.celltype.l2"
-    title <- paste0("Transcript-level 3' PBMC")
-    out_file <- paste0(output_prefix, "/UMAP_transcript_level_PBMC.pdf")
+    
+    if (y == "SC3pv3_transcript_isoquant") {
+      out_file <- paste0(output_prefix, "/UMAP_transcript_level_PBMC_isoquant.pdf")
+      title <- paste0("Transcript-level 3' PBMC IsoQuant")
+    } else {
+      out_file <- paste0(output_prefix, "/UMAP_transcript_level_PBMC_oarfish.pdf")
+      title <- paste0("Transcript-level 3' PBMC oarfish")
+    }
+    
   } else {
     cell_prediction <- "predicted.ann_level_3"
-    title <- paste0("Transcript-level 5' lung cancer DTCs")
-    out_file <- paste0(output_prefix, "/UMAP_transcript_level_lung.pdf")
+    
+    if (y == "SC5pv2_transcript_isoquant") {
+      out_file <- paste0(output_prefix, "/UMAP_transcript_level_lung_isoquant.pdf")
+      title <- paste0("Transcript-level 3' PBMC IsoQuant")
+    } else {
+      out_file <- paste0(output_prefix, "/UMAP_transcript_level_lung_oarfish.pdf")
+      title <- paste0("Transcript-level 3' PBMC oarfish")
+    }
+    
   }
   
   p1 <- DimPlot(x,
@@ -183,7 +197,7 @@ merged_meta <- mapply(FUN = function(x,y) {
   # Change NA to 0 to display any barcodes unique to each dataset
   merged_meta <- merged_meta %>% mutate_if(is.numeric, ~replace_na(., 0))
   
-}, x=pre_filter_objs[c(1,3)], y=pre_filter_objs[c(5,6)], SIMPLIFY = FALSE)
+}, x=pre_filter_objs[c(1,3)], y=pre_filter_objs[c(7,8)], SIMPLIFY = FALSE)
 ```
 
 ```{r}
@@ -269,65 +283,183 @@ mapply(FUN = function(x, y) {
 # Marker genes (Transcript-level)
 
 ```{r}
-# search for all transcript under a gene name
-
-pbmc_trascripts <- list()
-
-# Searches for transcript features within SCT counts
-pbmc_trascripts <- mapply(FUN = function(x) {
+# search for all transcript under a gene name withing each quantifier
+transcript_list <- mapply(FUN = function(x,y) {
   
-  feature <- grep(pattern = paste0("^", x, "\\."),
-                  x = rownames(seurat_objs_transcript$SC3pv3_transcript@assays$SCT@counts),
-                  value = TRUE)
+  if (y == "SC3pv3_transcript_isoquant" || y == "SC3pv3_transcript_oarfish") {
+    
+    markers <- marker_pbmc$markers
+    
+  } else {
+    markers <- marker_lung$markers
+    
+  }
   
-}, x = marker_pbmc$markers, SIMPLIFY = FALSE)
-
-pbmc_trascripts <- pbmc_trascripts[lengths(pbmc_trascripts) > 0]
-
-pbmc_trascripts <- as.character(unlist(pbmc_trascripts))
-
-# search for all transcript under a gene name
-
-lung_transcripts <- list()
-
-# Searches for transcript features within SCT counts
-lung_transcripts <- mapply(FUN = function(x) {
+  transcripts <- list()
   
-  feature <- grep(pattern = paste0("^", x, "\\."),
-                  x = rownames(seurat_objs_transcript$SC5pv2_transcript@assays$SCT@counts),
-                  value = TRUE)
+  # Searches for transcript features within SCT counts
+  for (marker in markers) {
+    feature <- sort(grep(pattern = paste0("^", marker, "\\."),
+                             x = rownames(x@assays$SCT@counts),
+                             value = TRUE))
+    
+    transcripts <- c(transcripts, feature)
+    
+  }
   
-}, x = marker_lung$markers, SIMPLIFY = FALSE)
+  transcripts <- transcripts[lengths(transcripts) > 0]
+  
+  transcripts <- as.character(unlist(transcripts))
+  
+  return(transcripts)
+  
+}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
 
-lung_transcripts <- lung_transcripts[lengths(lung_transcripts) > 0]
+# remove any transcripts where sum == 0
 
-lung_transcripts <- as.character(unlist(lung_transcripts))
-
-## remove any transcripts where sum == 0
-pbmc_trascripts <- pbmc_trascripts[sapply(pbmc_trascripts, function(transcript) {
-  sum(GetAssayData(seurat_objs_transcript$SC3pv3_transcript, layer = "data")[transcript, ]) > 0
-})]
-
-lung_transcripts <- lung_transcripts[sapply(lung_transcripts, function(transcript) {
-  sum(GetAssayData(seurat_objs_transcript$SC5pv2_transcript, layer = "data")[transcript, ]) > 0
-})]
+transcript_list <- mapply(FUN = function(x,y) {
+  
+  x <- x[sapply(x, function(transcript) {
+    sum(GetAssayData(y, layer = "data")[transcript, ]) > 0
+  })]
+  
+}, x = transcript_list, y = seurat_objs_transcript)
 ```
 
+
+### Plotting markers for cells with no labels ###
+Given the starting point of this analysis with scnanoseq outputs (isoquant outs [gene and transcript] and oarfish [transcript only at this time]), this validation analysis used
+the gene level data to transfer labels to both transcript datasets. However, in the oarfish data, a small amount of cells do not have labels in cases where a cell was retained in oarfish but
+not in isoquant's downstream analysis.
+
+**NOTE**: For simplicity in the scope of this analysis, the dotplot figures from the section below removes the subset of cells which do not contain a label. However, in order to visualize that these cells
+can still be labelled by marker expression, we plot this subset of cells here with their respective markers. 
+Thus, for more in-depth tertiary analysis we recommend users to label all cells (in this case one can manually overwrite any cells without labels to contain the labels where the markers expression can define the cell type.
+
+This is not done in this case, since we re-use these scripts to validate the pipeline with each release and the seurat cluster numbers can change from run to run.
+
 ```{r}
-mapply(FUN = function(x, y) {
-  
-  if (y == "SC3pv3_transcript") {
+# see issue https://github.com/satijalab/seurat/issues/8772 where dotplot doesn't plot cells which do not contain a label,
+# thus we separately visualize them here with seurat clusters instead. 
+# Based on this any NA cells can be further annotated, but for the scope of this analysis, only this visualization is done
+
+# In 3', 126 cells do not contain a label and 5' has 36
+seurat_transcript_tmp <- mapply(FUN = function(x, y) {
+
+  if (y == "SC3pv3_transcript_oarfish") {
     cell_prediction <- "predicted.celltype.l2"
-    title <- paste0("Transcript-level 3' PBMC")
-    out_file <- paste0(output_prefix, "/DotPlot_transcript_level_PBMC.pdf")
-    marker_input <- pbmc_trascripts
-    width_out <- 14
   } else {
     cell_prediction <- "predicted.ann_level_3"
-    title <- paste0("Transcript-level 5' lung cancer DTCs")
-    out_file <- paste0(output_prefix, "/DotPlot_transcript_level_lung.pdf")
-    marker_input <- lung_transcripts
+  }
+  
+  na_cells <- x@meta.data %>%
+    dplyr::select(.data[[cell_prediction]]) %>%
+    dplyr::filter(is.na(.data[[cell_prediction]]))
+  
+  message("---Number of cells without a label is:---")
+  print(nrow(na_cells))
+  
+  obj <- subset(x, cells = rownames(na_cells))
+  
+}, x = seurat_objs_transcript[c(2,4)], y = names(seurat_objs_transcript[c(2,4)]))
+
+# filter transcript further to remove any not present in na cells
+transcript_list_subset <- mapply(FUN = function(x,y) {
+  
+  x <- x[sapply(x, function(transcript) {
+    sum(GetAssayData(y, layer = "data")[transcript, ]) > 0
+  })]
+  
+}, x = transcript_list[c(2,4)], y = seurat_transcript_tmp)
+
+# plot
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_transcript_oarfish") {
+    out_file_dotplot <- paste0(output_prefix, "/PBMC_na_cells_dotplot.pdf")
+    out_file_featureplot <- paste0(output_prefix, "/PBMC_na_cells_featureplot.pdf")
+    marker_input <- transcript_list_subset$SC3pv3_transcript_oarfish
+    width_out <- 14
+  } else {
+    out_file_dotplot <- paste0(output_prefix, "/lung_na_cells_dotplot.pdf")
+    out_file_featureplot <- paste0(output_prefix, "/lung_na_cells_featureplot.pdf")
+    marker_input <- transcript_list_subset$SC5pv2_transcript_oarfish
     width_out <- 10
+  }
+  
+  Idents(x) <- "seurat_clusters"
+  
+  p1 <- DotPlot(object = x,
+                group.by = "seurat_clusters",
+                features = rev(marker_input),
+                assay = "SCT",
+                cols = c("#CC79A7","#009E73")) + 
+    coord_flip() +
+    theme(axis.title = element_text(size = 20),
+          axis.text.x = element_text(size=15, angle = 45, hjust=1),
+          axis.text.y = element_text(size=15))
+  
+  pdf(out_file_dotplot, height = 16, width = width_out)
+  plot(p1)
+  dev.off()
+  
+  # to co-visualize expression with cell labels
+  p2 <- FeaturePlot(object = x,
+                    features = rev(marker_input),
+                    cols = c("#D3D3D3", "#009E73"),
+                    order = TRUE)
+  
+  pdf(out_file_featureplot, width = 20, height = 20)
+  plot(p2)
+  dev.off()
+  
+}, x = seurat_transcript_tmp, y = names(seurat_transcript_tmp))
+
+rm(seurat_transcript_tmp, transcript_list_subset)
+```
+
+
+### DotPlots (transcript-level)
+
+```{r}
+# given visual inspection of the above, we now plot all transcript while removing
+# the few cells which do not have a label from oarfish analysis
+seurat_transcript_tmp <- seurat_objs_transcript
+
+seurat_transcript_tmp$SC3pv3_transcript_oarfish <- subset(seurat_transcript_tmp$SC3pv3_transcript_oarfish,
+                                                          predicted.celltype.l2 %in% na.omit(seurat_transcript_tmp$SC3pv3_transcript_oarfish$predicted.celltype.l2))
+
+seurat_transcript_tmp$SC5pv2_transcript_oarfish <- subset(seurat_transcript_tmp$SC5pv2_transcript_oarfish,
+                                                          predicted.ann_level_3 %in% na.omit(seurat_transcript_tmp$SC5pv2_transcript_oarfish$predicted.ann_level_3))
+
+
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_transcript_isoquant" || y == "SC3pv3_transcript_oarfish") {
+    cell_prediction <- "predicted.celltype.l2"
+    out_file <- paste0(output_prefix, "/DotPlot_PBMC_", y,".pdf")
+    width_out <- 14
+    
+    if (y == "SC3pv3_transcript_isoquant") {
+      marker_input <- transcript_list$SC3pv3_transcript_isoquant
+      title <- paste0("Transcript-level 3' PBMC (IsoQuant)")
+    } else {
+      marker_input <- transcript_list$SC3pv3_transcript_oarfish
+      title <- paste0("Transcript-level 3' PBMC (oarfish)")
+    }
+    
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+    out_file <- paste0(output_prefix, "/DotPlot_lung_", y,".pdf")
+    width_out <- 10
+    
+    if (y == "SC5pv2_transcript_isoquant") {
+      marker_input <- transcript_list$SC5pv2_transcript_isoquant
+      title <- paste0("Transcript-level 5' lung cancer DTCs (IsoQuant)")
+    } else {
+      marker_input <- transcript_list$SC5pv2_transcript_oarfish
+      title <- paste0("Transcript-level 5' lung cancer DTCs (oarfish)")
+    }
   }
   
   p1 <- DotPlot(object = x,
@@ -343,11 +475,13 @@ mapply(FUN = function(x, y) {
   
   #save
   
-  pdf(out_file, height = 16, width = width_out)
+  pdf(out_file, height = 18, width = width_out)
   plot(p1)
   dev.off()
   
-}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+}, x = seurat_transcript_tmp, y = names(seurat_transcript_tmp))
+
+rm(seurat_transcript_tmp)
 ```
 
 # Gene/Transcript specific FeaturePlots
