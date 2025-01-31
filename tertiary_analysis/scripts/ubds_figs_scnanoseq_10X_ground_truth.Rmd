@@ -491,16 +491,24 @@ rm(seurat_transcript_tmp)
 genes_subset_pbmc <- c("CD8A", "CD79A")
 genes_subset_lung <- c("C1QB", "CD3E")
 
-# note for pbmc rev order to print featureplot with most transcript on top
-trascripts_subset_pbmc <- pbmc_trascripts[grep(paste(genes_subset_pbmc, collapse = "|"), pbmc_trascripts)]
-trascripts_subset_lung <- lung_transcripts[grep(paste(genes_subset_lung, collapse = "|"), lung_transcripts)]
+# fetch all transcript for genes of interest
 
-# order based on subset input
-trascripts_subset_pbmc <- trascripts_subset_pbmc[order(match(sub("\\..*$", "", trascripts_subset_pbmc),
-                                                             genes_subset_pbmc))]
-
-trascripts_subset_lung <- trascripts_subset_lung[order(match(sub("\\..*$", "", trascripts_subset_lung),
-                                                             genes_subset_lung))]
+transcript_list_subset <- mapply(FUN = function(x,y) {
+  
+  if (y == "SC3pv3_transcript_isoquant" || y == "SC3pv3_transcript_oarfish") {
+    features <- x[grep(paste(genes_subset_pbmc, collapse = "|"), x)]
+    
+    # order based on subset input
+    features <- features[order(match(sub("\\..*$", "", features), genes_subset_pbmc))]
+    
+  } else {
+    features <- x[grep(paste(genes_subset_lung, collapse = "|"), x)]
+    
+    # order based on subset input
+    features <- features[order(match(sub("\\..*$", "", features), genes_subset_lung))]
+  }
+  
+}, x = transcript_list, y = names(transcript_list))
 
 # FeaturePlot (gene)
 mapply(FUN = function(x, y) {
@@ -537,18 +545,30 @@ mapply(FUN = function(x, y) {
 # FeaturePlot (transcript)
 mapply(FUN = function(x, y) {
   
-  if (y == "SC3pv3_transcript") {
+  if (y == "SC3pv3_transcript_isoquant" || y == "SC3pv3_transcript_oarfish") {
     cell_prediction <- "predicted.celltype.l2"
-    out_file <- paste0(output_prefix, "/Featureplot_transcript_level_PBMC.pdf")
-    marker_input <- trascripts_subset_pbmc
     n = 3
     width_out <- 15
+    marker_input <- transcript_list_subset[[y]]
+    
+    if (y == "SC3pv3_transcript_isoquant") {
+      out_file <- paste0(output_prefix, "/Featureplot_transcript_level_PBMC_isoquant.pdf")
+    } else {
+      out_file <- paste0(output_prefix, "/Featureplot_transcript_level_PBMC_oarfish.pdf")
+    }
+    
   } else {
     cell_prediction <- "predicted.ann_level_3"
-    out_file <- paste0(output_prefix, "/Featureplot_transcript_level_lung.pdf")
-    marker_input <- trascripts_subset_lung
+    marker_input <- transcript_list_subset[[y]]
     n = 4
     width_out <- 20
+    
+    if (y == "SC5pv2_transcript_isoquant") {
+      out_file <- paste0(output_prefix, "/Featureplot_transcript_level_lung_isoquant.pdf")
+    } else {
+      out_file <- paste0(output_prefix, "/Featureplot_transcript_level_lung_oarfish.pdf")
+    }
+    
   }
   
   p1 <- FeaturePlot(object = x,
