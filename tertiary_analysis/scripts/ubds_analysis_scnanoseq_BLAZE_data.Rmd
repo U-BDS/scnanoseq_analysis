@@ -23,13 +23,26 @@ This dataset is compared to the published BLAZE data/matrices which we have anal
 The input are the following files from the pipeline:
 
 ```
-└── scnanoseq_blaze_data
-    ├── ERR9958133.gene_counts.tsv
-    ├── ERR9958133.transcript_counts.tsv
-    ├── ERR9958134.gene_counts.tsv
-    ├── ERR9958134.transcript_counts.tsv
-    ├── ERR9958135.gene_counts.tsv
-    └── ERR9958135.transcript_counts.tsv
+├── isoquant
+│ ├── ERR9958133.gene.merged.tsv
+│ ├── ERR9958133.transcript.merged.tsv
+│ ├── ERR9958134.gene.merged.tsv
+│ ├── ERR9958134.transcript.merged.tsv
+│ ├── ERR9958135.gene.merged.tsv
+│ └── ERR9958135.transcript.merged.tsv
+└── oarfish
+    ├── ERR9958133
+    │ ├── barcodes.tsv.gz
+    │ ├── features.tsv.gz
+    │ └── matrix.mtx.gz
+    ├── ERR9958134
+    │ ├── barcodes.tsv.gz
+    │ ├── features.tsv.gz
+    │ └── matrix.mtx.gz
+    └── ERR9958135
+        ├── barcodes.tsv.gz
+        ├── features.tsv.gz
+        └── matrix.mtx.gz
 ```
 
 
@@ -54,21 +67,29 @@ lapply(list.files("./scripts/R"), FUN = function(x) source(paste0("./scripts/R/"
 output_prefix <- "./output_BLAZE_scnanoseq_data"
 
 # input files (sample and feature type [gene/transcript])
-in_files <- dir("./input/scnanoseq_blaze_data",full.names = TRUE)
-in_files
+in_files_isoquant <- dir("./input/scnanoseq_blaze_data/isoquant",full.names = TRUE)
+in_files_isoquant
+
+in_files_oarfish <- dir("./input/scnanoseq_blaze_data/oarfish",full.names = TRUE)
+in_files_oarfish
 
 # sample names
-sample_names <- dir("./input/scnanoseq_blaze_data",full.names = FALSE)
-sample_names <- gsub("\\..*","",sample_names)
+sample_names_isoquant <- dir("./input/scnanoseq_blaze_data/isoquant",full.names = FALSE)
+sample_names_isoquant <- gsub("\\..*","",sample_names_isoquant)
+
+# sample names
+sample_names_oarfish <- dir("./input/scnanoseq_blaze_data/oarfish",full.names = FALSE)
 
 # feature
-feature_type <- dir("./input/scnanoseq_blaze_data",full.names = FALSE)
-feature_type <- gsub("_.*","",feature_type)
-feature_type <- gsub(".*\\.","",feature_type)
+feature_type_isoquant <- dir("./input/scnanoseq_blaze_data/isoquant",full.names = FALSE)
+feature_type_oarfish <- rep("transcript", length(in_files_oarfish))
 
 # clean basenames with feature type
-basenames <- paste0(sample_names, "_", feature_type)
-basenames
+basenames_isoquant <- paste0(sample_names_isoquant, "_", feature_type_isoquant, "_isoquant")
+basenames_isoquant
+
+basenames_oarfish <- paste0(sample_names_oarfish, "_", feature_type_oarfish, "_oarfish")
+basenames_oarfish
 ```
 
 # PREPARE INPUT DATA
@@ -76,15 +97,47 @@ basenames
 ```{r}
 dir.create(file.path(output_prefix), recursive = TRUE)
 
+### isoquant ###
 # Read in the matrices
 # At this time, gene and transcript will be part of the same list.
 # If needed, feature type can be split at a later time
-cell_bc_matrix <- lapply(setNames(in_files,
-                                 make.names(basenames)),
+cell_bc_matrix <- lapply(setNames(in_files_isoquant,
+                                 make.names(basenames_isoquant)),
                read.table, sep = "\t", header = TRUE, row.names = 1)
 
+### oarfish ###
+
+### oarfish ###
+cell_bc_matrix_oarfish <- lapply(setNames(in_files_oarfish,
+                                          make.names(basenames_oarfish)),
+                                 Read10X, gene.column = 1, cell.column = 1)
+
+# select the transcript IDs for oarfish data
+
+cell_bc_matrix_oarfish <- lapply(X = cell_bc_matrix_oarfish, FUN = function(x) {
+  
+  rows <- rownames(x)
+  transcript_names <- do.call(rbind, strsplit(rows, split = '|', fixed = TRUE))
+  
+  # col 1 corresponds to transcript IDs
+  names <- transcript_names[,1]
+  
+  # convert all - to . for consistancy with isoquant data (not needed otherwise)
+  names <- gsub("-", ".", names)
+  
+  row.names(x) <- names
+  
+  return(x)
+})
+```
+
+```{r}
+### Seurat objects ###
+
 # Create the seurat object using RNA Assay
-seurat_objs <- mapply(FUN = function(x,y) {
+
+### isoquant ###
+seurat_objs_isoquant <- mapply(FUN = function(x,y) {
   
   seurat_obj <- CreateSeuratObject(
     counts = x,
@@ -96,8 +149,30 @@ seurat_objs <- mapply(FUN = function(x,y) {
   return(seurat_obj)
   
 }, x=cell_bc_matrix, y=names(cell_bc_matrix))
+
+### oarfish ###
+
+seurat_objs_oarfish <- mapply(FUN = function(x,y) {
+  
+  seurat_obj <- CreateSeuratObject(
+    counts = x,
+    assay = "RNA",
+    min.cells = 1,
+    min.features = 1,
+    project = y)
+  
+  return(seurat_obj)
+  
+}, x=cell_bc_matrix_oarfish, y=names(cell_bc_matrix_oarfish))
 ```
 
+Combining all objects into a single list to easily iterate over all until object integration
+
+```{r}
+seurat_objs <- c(seurat_objs_isoquant, seurat_objs_oarfish)
+
+feature_type_all <- c(feature_type_isoquant, feature_type_oarfish)
+```
 
 # GENERATE QC'S
 
@@ -162,7 +237,7 @@ ids_per_obj <- mapply(FUN = function(x,y) {
   
   return(obj_id)
   
-}, x=seurat_objs, y=feature_type, SIMPLIFY = FALSE)
+}, x=seurat_objs, y=feature_type_all, SIMPLIFY = FALSE)
 
 # --- add percentages based on per sample ids ---
 seurat_objs <- mapply(FUN = function(x,y) {
@@ -201,7 +276,7 @@ mapply(FUN = function(x,y) {
   
   
   pdf(file = file_name2,
-      width = 8,
+      width = 12,
       height = 6)
   
   plot1 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "percent.mt")
@@ -333,11 +408,11 @@ write.csv(cell_count, paste0(output_prefix, "/cell_count_pre_filtering.csv"), ro
 # Users from the pipeline are advised to careful consider them and change as needed
 # Also NOTE: mito % seems a bit high for cortical neuro - a data point to keep in mind from BLAZE data (cutoff at 20% or below)
 
-nFeature_RNA_min <- c(100, 100, 100, 100, 700, 700)
+nFeature_RNA_min <- c(100, 100, 100, 100, 700, 700, 100, 100, 700)
 
 seurat_objs <- mapply(FUN = function(x,y) {
   
-  RNA_10X <- subset(x = x, subset  =  nFeature_RNA > y & nFeature_RNA < 999999 & percent.mt < 20)
+  RNA_10X <- subset(x = x, subset  =  nFeature_RNA > y & percent.mt < 20)
   
 }, x = seurat_objs, y = nFeature_RNA_min)
 ```
@@ -362,7 +437,7 @@ mapply(FUN = function(x,y) {
   
   
   pdf(file = file_name2,
-      width = 8,
+      width = 12,
       height = 6)
   
   plot1 <- FeatureScatter(object = x, feature1 = "nCount_RNA", feature2 = "percent.mt")
@@ -481,7 +556,6 @@ seurat_objs <- mapply(FUN = function(x) {
   return(seurat_obj)
   
 }, x=seurat_objs)
-
 ```
 
 # ELBOW PLOT
@@ -515,7 +589,7 @@ dir.create(dim_output_dir, recursive = TRUE)
 
 seurat_obj_tmp <- seurat_objs
 
-cluster_res <- seq(from = 0, to = 1, by = 0.1)
+cluster_res <- seq(from = 0.2, to = 0.8, by = 0.1)
 
 dim <- seq(from = 5, to = 7, by = 1)
 
@@ -574,7 +648,7 @@ dim <- 6
 
 tmp_seurat_clustree <- seurat_objs
 
-clustree_res <- seq(from = 0, to = 1, by = 0.1)
+clustree_res <- seq(from = 0.2, to = 0.8, by = 0.1)
 
 res <- tidyr::expand_grid(clustree_res, dim)
 
@@ -730,7 +804,7 @@ mapply(FUN = function(x, y, z) {
                       paste0(output_prefix, "/markers_", y,"/"),
                       )
   
-}, x = seurat_objs, y = names(seurat_objs), z = feature_type)
+}, x = seurat_objs, y = names(seurat_objs), z = feature_type_all)
 ```
 
 # SAVE PROCESSED OBJECT
