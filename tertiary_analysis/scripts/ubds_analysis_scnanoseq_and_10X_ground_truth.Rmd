@@ -26,11 +26,11 @@ input/scnanoseq_10X_data/
 │├── SC5pv2_GEX_Human_Lung_Carcinoma_DTC_ONT.gene.merged.tsv
 │└── SC5pv2_GEX_Human_Lung_Carcinoma_DTC_ONT.transcript.merged.tsv
 └── oarfish
-    ├── 3_prime
+    ├── SC3pv3
     │├── barcodes.tsv.gz
     │├── features.tsv.gz
     │└── matrix.mtx.gz
-    └── 5_prime
+    └── SC5pv2
         ├── barcodes.tsv.gz
         ├── features.tsv.gz
         └── matrix.mtx.gz
@@ -646,7 +646,13 @@ saveRDS(seurat_objs, paste0(output_prefix,"/all_10X_prefilter.rds"))
 
 ```{r}
 # filtering criteria b/t gene and transcript is != based on QC plot
+
+### For UMI-TOOLS DEDUP (default outputs)
+
 nFeature_RNA_min <- c(500, 800, 500, 800, 800, 800, 500, 500)
+
+### For Picard markduplicates dedup (optional in pipeline, more conservative in markding dups)
+#nFeature_RNA_min <- c(100, 100, 500, 800, 800, 800, 500, 500)
 
 # filter
 seurat_objs <- mapply(FUN = function(x, y) {

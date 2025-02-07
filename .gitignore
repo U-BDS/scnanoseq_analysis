@@ -11,5 +11,6 @@ tertiary_analysis/input/CellRanger_10X_data/*
 tertiary_analysis/input/scnanoseq_10X_data/*
 tertiary_analysis/input/OLD/*
 tertiary_analysis/input/references/*.gtf
+tertiary_analysis/PICARD_INPUTS_OUTPUTS/*
 output_*
 *.SeuratData
