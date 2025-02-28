@@ -82,6 +82,9 @@ sample_names_oarfish <- dir("./input/scnanoseq_blaze_data/oarfish",full.names = 
 
 # feature
 feature_type_isoquant <- dir("./input/scnanoseq_blaze_data/isoquant",full.names = FALSE)
+
+feature_type_isoquant <- gsub(".*\\.(gene|transcript)\\..*", "\\1", feature_type_isoquant)
+
 feature_type_oarfish <- rep("transcript", length(in_files_oarfish))
 
 # clean basenames with feature type
