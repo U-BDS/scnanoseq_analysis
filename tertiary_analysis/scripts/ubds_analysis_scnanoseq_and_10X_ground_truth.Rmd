@@ -1410,8 +1410,8 @@ write.csv(as.data.frame(percent_ratio), paste0(output_prefix,"/percent_barcodes_
 NOTE: In the current analysis. all cells from the 3' and 5' isoquant datasets contained an annotation that was transferred from gene to transcript (100%)
 
 For oarfish, 97-98% was the transfer rate (expected given the input to gene-level was isoquant). Users are encouraged 
-to further label any non-annotated cells based on localization / cell marker expression or input gene-level oarfish data (beyond the scope of this validation analysis). Most of the cells that did not receive a label were cells that were
-dropped in QC steps from isoquant outputs, but retained in oarfish.
+to further label any non-annotated cells based on localization / cell marker expression or input gene-level oarfish data (which is beyond the scope of this validation analysis). 
+Most of the cells that did not receive a label, were cells that were dropped in QC steps from isoquant outputs, but retained in oarfish.
 
 ```{r}
 seurat_objs_transcript <- mapply(FUN = function(x) {

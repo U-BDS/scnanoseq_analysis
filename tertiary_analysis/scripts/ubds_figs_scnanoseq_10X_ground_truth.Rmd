@@ -486,6 +486,8 @@ rm(seurat_transcript_tmp)
 
 # Gene/Transcript specific FeaturePlots
 
+#####TODO: Change transcript feature plots to small dotplots (for the sake of space) in final figs (can keep this code just add the dotplot)
+
 
 ```{r}
 genes_subset_pbmc <- c("CD8A", "CD79A")
