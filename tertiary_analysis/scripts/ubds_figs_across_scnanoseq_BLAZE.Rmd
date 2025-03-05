@@ -289,8 +289,8 @@ UMAPs <- mapply(FUN = function(x, y, z) {
 
 
 pdf(paste0(output_prefix, "/","FeaturePlot_nFeature_You_et_al.pdf"),
-    width = 8,
-    height = 8)
+    width = 9,
+    height = 12)
 
 gridExtra::grid.arrange(grobs = UMAPs)
 
