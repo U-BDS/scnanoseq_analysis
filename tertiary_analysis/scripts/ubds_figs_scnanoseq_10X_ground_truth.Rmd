@@ -55,6 +55,8 @@ seurat_int <- mapply(FUN = function(x,y) {
   
 }, x=seurat_int, y=cell_idents)
 
+cell_idents <- c("predicted.celltype.l2", "predicted.celltype.l2", "predicted.ann_level_3", "predicted.ann_level_3")
+
 seurat_objs_transcript <- mapply(FUN = function(x,y) {
 
   Idents(x) <- y
@@ -118,10 +120,10 @@ mapply(FUN = function(x, y) {
     
     if (y == "SC3pv3_transcript_isoquant") {
       out_file <- paste0(output_prefix, "/UMAP_transcript_level_PBMC_isoquant.pdf")
-      title <- paste0("Transcript-level 3' PBMC IsoQuant")
+      title <- paste0("Transcript-level \n 3' PBMC IsoQuant")
     } else {
       out_file <- paste0(output_prefix, "/UMAP_transcript_level_PBMC_oarfish.pdf")
-      title <- paste0("Transcript-level 3' PBMC oarfish")
+      title <- paste0("Transcript-level \n 3' PBMC oarfish")
     }
     
   } else {
@@ -129,10 +131,10 @@ mapply(FUN = function(x, y) {
     
     if (y == "SC5pv2_transcript_isoquant") {
       out_file <- paste0(output_prefix, "/UMAP_transcript_level_lung_isoquant.pdf")
-      title <- paste0("Transcript-level 3' PBMC IsoQuant")
+      title <- paste0("Transcript-level \n 5' lung IsoQuant")
     } else {
       out_file <- paste0(output_prefix, "/UMAP_transcript_level_lung_oarfish.pdf")
-      title <- paste0("Transcript-level 3' PBMC oarfish")
+      title <- paste0("Transcript-level \n 5' lung oarfish")
     }
     
   }
@@ -154,7 +156,7 @@ mapply(FUN = function(x, y) {
           plot.subtitle = element_text(size = 20, face = "bold", hjust = 0.5))
   #save
   
-  pdf(out_file, height = 8, width = 8)
+  pdf(out_file, height = 8, width = 5)
   plot(p1)
   dev.off()
   
@@ -484,14 +486,11 @@ mapply(FUN = function(x, y) {
 rm(seurat_transcript_tmp)
 ```
 
-# Gene/Transcript specific FeaturePlots
-
-#####TODO: Change transcript feature plots to small dotplots (for the sake of space) in final figs (can keep this code just add the dotplot)
-
+# Gene/Transcript specific features
 
 ```{r}
 genes_subset_pbmc <- c("CD8A", "CD79A")
-genes_subset_lung <- c("C1QB", "CD3E")
+genes_subset_lung <- c("C1QB", "CD3E", "KRT15")
 
 # fetch all transcript for genes of interest
 
@@ -512,6 +511,67 @@ transcript_list_subset <- mapply(FUN = function(x,y) {
   
 }, x = transcript_list, y = names(transcript_list))
 
+# VlnPlot (transcript)
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_transcript_isoquant" || y == "SC3pv3_transcript_oarfish") {
+    cell_prediction <- "predicted.celltype.l2"
+    cell_types = c("CD8 Naive", "CD8 TEM", "CD8 TCM", "B naive", "B intermediate", "B memory")
+    width_out <- 6
+    marker_input <- transcript_list_subset[[y]]
+    
+    if (y == "SC3pv3_transcript_isoquant") {
+      out_file <- paste0(output_prefix, "/Violins_transcript_level_PBMC_isoquant.pdf")
+      plot_title <- "IsoQuant"
+    } else {
+      out_file <- paste0(output_prefix, "/Violins_transcript_level_PBMC_oarfish.pdf")
+      plot_title <- "oarfish"
+    }
+    
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+    marker_input <- transcript_list_subset[[y]]
+    cell_types = c("Macrophages", "T cell lineage", "Basal")
+    width_out <- 6
+    
+    if (y == "SC5pv2_transcript_isoquant") {
+      out_file <- paste0(output_prefix, "/Violins_transcript_level_lung_isoquant.pdf")
+      plot_title <- "Transcript-level IsoQuant"
+    } else {
+      out_file <- paste0(output_prefix, "/Violins_transcript_level_lung_oarfish.pdf")
+      plot_title <- "Transcript-level oarfish"
+    }
+    
+  }
+
+  seurat_subset <- subset(x, idents = cell_types)
+
+  Idents(seurat_subset) <- factor(Idents(seurat_subset), levels = cell_types)
+
+  p1 <- VlnPlot(object = seurat_subset,
+                features = marker_input,
+                assay = "SCT",
+                stack = TRUE,
+                flip = TRUE) + 
+    ggtitle(plot_title) +
+    theme(legend.position="bottom",
+          legend.text = element_text(size = 15),
+          axis.title = element_text(size = 20),
+          axis.text.x = element_text(size=15),
+          axis.text.y = element_text(size=15)) + NoLegend()
+  
+  #save
+  
+  pdf(out_file, height = 8, width = width_out)
+  plot(p1)
+  dev.off()
+  
+}, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
+```
+
+
+Feature plots of the same features highlighted above:
+```{r}
 # FeaturePlot (gene)
 mapply(FUN = function(x, y) {
   
