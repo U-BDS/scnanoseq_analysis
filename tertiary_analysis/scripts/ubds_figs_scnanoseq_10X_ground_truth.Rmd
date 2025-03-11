@@ -92,7 +92,7 @@ mapply(FUN = function(x, y) {
                 reduction = "umap",
                 label = TRUE,
                 pt.size = NULL,
-                label.size = 4,
+                label.size = 5,
                 repel = TRUE) + NoLegend() +
     guides(color = guide_legend(override.aes = list(size = 4), ncol=1)) +
     ggtitle(title) +
@@ -145,7 +145,7 @@ mapply(FUN = function(x, y) {
                 reduction = "umap",
                 label = TRUE,
                 pt.size = NULL,
-                label.size = 4,
+                label.size = 5,
                 repel = TRUE) + NoLegend() +
     guides(color = guide_legend(override.aes = list(size = 4), ncol=1)) +
     ggtitle(title, subtitle = "scnanoseq_Oxford") + 
@@ -522,10 +522,10 @@ mapply(FUN = function(x, y) {
     
     if (y == "SC3pv3_transcript_isoquant") {
       out_file <- paste0(output_prefix, "/Violins_transcript_level_PBMC_isoquant.pdf")
-      plot_title <- "IsoQuant"
+      plot_title <- "Transcript-level IsoQuant"
     } else {
       out_file <- paste0(output_prefix, "/Violins_transcript_level_PBMC_oarfish.pdf")
-      plot_title <- "oarfish"
+      plot_title <- "Transcript-level oarfish"
     }
     
   } else {
