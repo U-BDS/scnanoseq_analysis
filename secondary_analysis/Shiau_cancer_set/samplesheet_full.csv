@@ -1,0 +1,7 @@
+sample,fastq,cell_count
+GSM6564300,/scratch/lianov/FINAL_patch_1.1.0_tests/umitools_test_FINAL/stress_test/fastqs/fastq/SRX17495527_SRR21492159.fastq.gz,5000
+GSM6564301,/scratch/lianov/FINAL_patch_1.1.0_tests/umitools_test_FINAL/stress_test/fastqs/fastq/SRX17495528_SRR21492158.fastq.gz,5000
+GSM6564302,/scratch/lianov/FINAL_patch_1.1.0_tests/umitools_test_FINAL/stress_test/fastqs/fastq/SRX17495529_SRR21492157.fastq.gz,5000
+GSM6564303,/scratch/lianov/FINAL_patch_1.1.0_tests/umitools_test_FINAL/stress_test/fastqs/fastq/SRX17495530_SRR21492156.fastq.gz,5000
+GSM6564304,/scratch/lianov/FINAL_patch_1.1.0_tests/umitools_test_FINAL/stress_test/fastqs/fastq/SRX17495531_SRR21492155.fastq.gz,5000
+GSM6564305,/scratch/lianov/FINAL_patch_1.1.0_tests/umitools_test_FINAL/stress_test/fastqs/fastq/SRX17495532_SRR21492154.fastq.gz,5000

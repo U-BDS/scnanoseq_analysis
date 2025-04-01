@@ -1,25 +1,27 @@
 # names/email
 email: "lianov@uab.edu"
 multiqc_title: "scnanoseq_10X_5_prime"
-#NOTE: for 5' data which is __V2__, default whitelist from pipeline is good to go
-# see https://kb.10xgenomics.com/hc/en-us/articles/115004506263-What-is-a-barcode-whitelist-
+#NOTE: for 5' data which is __V2__, and pipeline should also grab 5' default
 
 # input samplesheet
 input: "./samplesheet.csv"
 
 # Genome references
-# genome use matching original 10X Genomics analysis from application note
-fasta: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_32/GRCh38.primary_assembly.genome.fa"
+genome_fasta: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_32/GRCh38.primary_assembly.genome.fa"
+transcript_fasta: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_32/gencode.v32.transcripts.fa.gz"
 gtf: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_32/GTF/gencode.v32.annotation.gtf"
 
 # other params
 skip_trimming: false
-skip_nanoplot: false
+skip_nanoplot: false 
+skip_fastqc: false # since 1.1.0 no longer needed for read metrics (summary table) in multiqc, but enabled here to capture benchmarks across all tools
 min_length: 500
-min_q_score: 10
+
+# quantification
+quantifier: "isoquant,oarfish"
 
 # fastq options
 split_amount: 500000
 
-# barcode options
+# barcode options for V5
 barcode_format: "10X_5v2"
