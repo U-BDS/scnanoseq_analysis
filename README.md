@@ -38,19 +38,18 @@ The validation and benchmarking data is derived from the following datasets:
 3. **Shiau et al. datasets** (cited below) contained 6 samples with depths ranging from 67.4M - 105.3M reads. A custom `whitelist` (“737K-arc-v1.txt” from 10X Genomics) was used, in line with the authors' library preparation protocol.
 
 	>Shiau CK, Lu L, Kieser R et al. High throughput single cell long-read sequencing analyses of same-cell genotypes and phenotypes in human tumors. Nat Commun 2023;14:4124. https://doi.org/10.1038/s41467-023-39813-7
-<!---
-TODO:
-3. Add URL to Docker image
-4. Add Zenodo for this repo 
--->
+
 ## Docker Image
 
 The Docker image containing the analytical dependencies for the tertiary analysis conducted in R is available at <https://hub.docker.com/r/uabbds/scnanoseq_analysis>. All Docker images were converted to Singularity images with processing performed at the UAB High Performance Computing cluster. Version 0.3.0 was the image implemented at the time of writting the pre-print.
 
-<!---
 ## Citation
-Add pre-print DOI
--->
+
+If you use nf-core/scnanoseq, please cite our work as:
+
+>scnanoseq: an nf-core pipeline for Oxford Nanopore single-cell RNA-sequencing
+>Austyn Trull, nf-core community, Elizabeth A. Worthey, Lara Ianov
+>bioRxiv 2025.04.08.647887; doi: https://doi.org/10.1101/2025.04.08.647887
 
 ## Slack channel
 
