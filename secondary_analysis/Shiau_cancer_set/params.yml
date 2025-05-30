@@ -1,27 +1,28 @@
 # names/email
 email: "lianov@uab.edu"
-multiqc_title: "scnanoseq_10X_3_prime"
-#NOTE: for 3' data which is __V3__, default whitelist from pipeline is good to go
+multiqc_title: "tumor_datasets_scnanoseq_oarfish"
 
 # input samplesheet
-input: "./samplesheet.csv"
+input: "./samplesheet_full.csv"
 
-# References
+# Genome references matching reported version in original publication
 genome_fasta: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_32/GRCh38.primary_assembly.genome.fa"
 transcript_fasta: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_32/gencode.v32.transcripts.fa.gz"
 gtf: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_32/GTF/gencode.v32.annotation.gtf"
 
 # other params
 skip_trimming: false
-skip_nanoplot: false 
-skip_fastqc: false # since 1.1.0 no longer needed for read metrics (summary table) in multiqc, but enabled here to capture benchmarks across all tools
+skip_fastqc: false # since 1.1.0 not needed, but enabling for preprint
 min_length: 500
+min_q_score: 10
 
 # quantification
 quantifier: "isoquant,oarfish"
 
 # fastq options
-split_amount: 500000 
+split_amount: 1000000
 
-# barcode options (default also fine here for V3, see config link above)
+# barcode options
+whitelist: "/scratch/lianov/FINAL_patch_1.1.0_tests/umitools_test_FINAL/stress_test/737K-arc-v1.txt"
 barcode_format: "10X_3v3"
+

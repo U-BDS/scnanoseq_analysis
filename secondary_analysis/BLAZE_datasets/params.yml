@@ -1,24 +1,28 @@
 # names/email
 email: "lianov@uab.edu"
-multiqc_title: "scnanoseq_10X_3_prime"
+multiqc_title: "scnanoseq_10X_3_prime_BLAZE_data"
 #NOTE: for 3' data which is __V3__, default whitelist from pipeline is good to go
 
 # input samplesheet
 input: "./samplesheet.csv"
 
 # Genome references
-# genome use matching original BLAZE dataset publication
-fasta: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_31/GRCh38.primary_assembly.genome.fa"
+genome_fasta: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_31/GRCh38.primary_assembly.genome.fa"
+transcript_fasta: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_31/gencode.v31.transcripts.fa"
 gtf: "/data/project/U_BDS/References/GENCODE/hg38/gencode_release_31/GTF/gencode.v31.annotation.gtf"
 
 # other params
 skip_trimming: false
 skip_nanoplot: false
+skip_fastqc: false # since 1.1.0 no longer needed for read metrics (summary table) in multiqc, but enabled here to capture benchmarks across all tools
 min_length: 500
-min_q_score: 10
+
+# quantification
+quantifier: "isoquant,oarfish"
 
 # fastq options
+# a test of not splitting the data
 split_amount: 0 
 
-# barcode options
+# barcode options (default also fine here for V3, see config link above)
 barcode_format: "10X_3v3"
