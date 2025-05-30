@@ -646,3 +646,45 @@ mapply(FUN = function(x, y) {
   
 }, x = seurat_objs_transcript, y = names(seurat_objs_transcript))
 ```
+
+# Gene-level violins for expression discrepancy b/t short read and long read
+
+```{r}
+genes_subset_pbmc <- c("AFF3", "BANK1", "FHIT", "NCAM1", "NELL2")
+genes_subset_lung <- c("CCL4", "IGFBP2", "TRAC")
+
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_gene_int") {
+    cell_prediction <- "predicted.celltype.l2"
+    title <- paste0("Gene-level 3' PBMC")
+    out_file <- paste0(output_prefix, "/Discordant_gene_level_PBMC.pdf")
+    marker_input <- genes_subset_pbmc
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+    title <- paste0("Gene-level 5' lung cancer DTCs")
+    out_file <- paste0(output_prefix, "/Discordant_gene_level_lung.pdf")
+    marker_input <- genes_subset_lung
+  }
+  
+  p1 <- VlnPlot(object = x,
+                split.by = "sample_info",
+                group.by = cell_prediction,
+                features = marker_input,
+                assay = "SCT",
+                stack = TRUE,
+                flip = TRUE) + 
+    ggtitle(title) +
+    theme(legend.position="bottom",
+          axis.text.x = element_text(size=6),
+          text = element_text(size = 6),
+          legend.key.size = unit(0.2, "cm"))
+  
+  #save
+  
+  pdf(out_file, height = 4, width = 4)
+  plot(p1)
+  dev.off()
+  
+}, x = seurat_int, y = names(seurat_int))
+```
