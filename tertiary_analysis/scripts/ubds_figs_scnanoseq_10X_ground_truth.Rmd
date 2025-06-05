@@ -688,3 +688,52 @@ mapply(FUN = function(x, y) {
   
 }, x = seurat_int, y = names(seurat_int))
 ```
+
+# Azimuth scores
+
+```{r}
+my_colors <- c("#f27b71", "#2a8c95")
+
+mapply(FUN = function(x, y) {
+  
+  if (y == "SC3pv3_gene_int") {
+    cell_prediction <- "predicted.celltype.l2"
+    score <- "predicted.celltype.l2.score"
+    title <- paste0("Azimuth Label Transfer Scores: 3' PBMC")
+    out_file <- paste0(output_prefix, "/Azimuth_scores_PBMC.pdf")
+  } else {
+    cell_prediction <- "predicted.ann_level_3"
+    score <- "predicted.ann_level_3.score"
+    title <- paste0("Azimuth Label Transfer Scores: 5' lung cancer DTCs")
+    out_file <- paste0(output_prefix, "/Azimuth_scores_lung.pdf")
+  }
+  
+  p1 <- ggplot(x@meta.data,
+               aes(x = .data[[cell_prediction]],
+                   y = .data[[score]],
+                   fill = sample_info)) +
+    geom_boxplot(position = position_dodge(width = 0.75)
+                 ,outlier.shape = NA) +
+    geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.75),
+                size = 0.6,
+                alpha = 0.5) +
+    theme_classic() +
+    xlab("Identity") +
+    ylab("Azimuth Score") +
+    ggtitle(title) +
+    theme(legend.position = "bottom",
+          legend.text = element_text(size = 15),
+          legend.title=element_blank(),
+          axis.title = element_text(size = 20),
+          axis.text.x = element_text(size=15, angle = 45, hjust = 1),
+          axis.text.y = element_text(size=15)) + 
+    scale_fill_manual(values = my_colors)
+  
+  #save
+  
+  pdf(out_file, height = 6, width = 12)
+  plot(p1)
+  dev.off()
+  
+}, x = seurat_int, y = names(seurat_int))
+```
