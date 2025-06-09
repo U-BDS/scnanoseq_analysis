@@ -104,8 +104,16 @@ mapply(FUN = function(x,y,z,out_file) {
   
   if (z == "ERR9958135_transcript_oarfish") {
     feature_1 <- "nFeature_RNA_oarfish_scnanoseq"
-  } else  {
+    axis_x <- paste0("Number of ", y, "s in oarfish scnanoseq")
+    axis_y <- paste0("Number of ", y, "s in You et al.")
+  } else if (z == "ERR9958135_transcript_isoquant") {
     feature_1 <- "nFeature_RNA_isoquant_scnanoseq"
+    axis_x <- paste0("Number of ", y, "s in IsoQuant scnanoseq")
+    axis_y <- paste0("Number of ", y, "s in You et al.")
+  } else if (z == "ERR9958135_gene_isoquant") {
+    feature_1 <- "nFeature_RNA_isoquant_scnanoseq"
+    axis_x <- paste0("Number of ", y, "s in IsoQuant scnanoseq")
+    axis_y <- paste0("Number of ", y, "s in You et al.")
   }
   
   scatter_plot <- scatter_corr(data.frame = x,
@@ -116,6 +124,8 @@ mapply(FUN = function(x,y,z,out_file) {
                                axis_size = 15,
                                point_size = 2,
                                point_alpha = 0.5) + 
+    xlab(axis_x) +
+    ylab(axis_y) +
     theme(axis.title = element_text(size = 20))
   
   file_name <- paste0(output_prefix, "/", out_file)
@@ -139,8 +149,12 @@ mapply(FUN = function(x,y,z, out_file) {
   
   if (z == "ERR9958135_transcript_oarfish") {
     feature_1 <- "nCount_RNA_oarfish_scnanoseq"
-  } else  {
+    axis_x <- paste0("Number of molecules in oarfish scnanoseq")
+    axis_y <- paste0("Number of molecules in You et al.")
+  } else {
     feature_1 <- "nCount_RNA_isoquant_scnanoseq"
+    axis_x <- paste0("Number of molecules in IsoQuant scnanoseq")
+    axis_y <- paste0("Number of molecules in You et al.") 
   }
   
   scatter_plot <- scatter_corr(data.frame = x,
@@ -151,6 +165,8 @@ mapply(FUN = function(x,y,z, out_file) {
                                axis_size = 15,
                                point_size = 2,
                                point_alpha = 0.5) + 
+    xlab(axis_x) +
+    ylab(axis_y) +
     theme(axis.title = element_text(size = 20))
   
   file_name <- paste0(output_prefix, "/", out_file)

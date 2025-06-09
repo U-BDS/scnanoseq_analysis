@@ -209,6 +209,8 @@ merged_meta <- mapply(FUN = function(x,y) {
 
 feature_1 <- "nFeature_RNA_scnanoseq"
 feature_2 <- "nFeature_RNA_ground_truth"
+axis_x <- "Number of genes in scnanoseq_Oxford"
+axis_y <- "Number of genes in CR_Illumina"
 output_feature <- "_nFeature_pre_filter.pdf"
 
 mapply(FUN = function(x,y) {
@@ -225,7 +227,7 @@ mapply(FUN = function(x,y) {
   
   # make axis titles cleaner:
   
-  scatter_plot <- scatter_plot + xlab("nFeature scnanoseq_Oxford") + ylab("nFeature CR_Illumina")
+  scatter_plot <- scatter_plot + xlab(axis_x) + ylab(axis_y)
   
   file_name <- paste0(output_prefix, "/", y, output_feature)
 
